@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sony Corporation (VID 0x054C = 1356): a6000 / a6400 / a6700 in PC Remote mode -->
+    <usb-device vendor-id="1356" />
+
+    <!-- MacroSilicon MS2109 / MS2130 (VID 0x345F = 13407) -->
+    <usb-device vendor-id="13407" />
+
+    <!-- USB Video Class (UVC) capture cards & webcams -->
+    <usb-device class="239" subclass="2" />
+    <usb-device class="14" />
+</resources>
