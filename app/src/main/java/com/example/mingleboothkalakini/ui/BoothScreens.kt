@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.example.mingleboothkalakini.R
 import com.example.mingleboothkalakini.camera.HdmiCaptureController
+import com.example.mingleboothkalakini.camera.HdmiCaptureState
 import com.example.mingleboothkalakini.camera.SonyCameraController
 import com.example.mingleboothkalakini.camera.SonyCameraState
 import com.example.mingleboothkalakini.data.BoothResult
@@ -65,19 +66,20 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-// Mingle Booth Retro-Editorial Palette (Matched to Mingle Booth Retro Logo.png: #EE3501, #FDF9F2, #230501)
+// Mingle Booth Retro-Editorial Palette (AGENTS.md Warm Retro Tokens)
+val WarmSand = Color(0xFFF7F3EB)
 val BgCream = Color(0xFFFDF9F2)
 val SurfaceSand = Color(0xFFF7ECE1)
 val SoftPeach = Color(0xFFFCE4D8)
-val CardCream = Color(0xFFFFFCF9)
-val BorderWarm = Color(0xFFEAD7C7)
-val Terracotta = Color(0xFFEE3501)       // Signature Retro Vermilion Red-Orange from logo
+val CardCream = Color(0xFFFFFDF8)
+val BorderWarm = Color(0xFFE6DFD3)
+val Terracotta = Color(0xFFBD5338)       // Earthy Retro Terracotta
 val SunsetCoral = Color(0xFFFF6B3D)      // Warm Coral-Orange highlight
 val DeepVermilion = Color(0xFFC82800)    // Deep Retro Red shade
-val Espresso = Color(0xFF2B0E07)         // Rich Dark Crimson-Espresso ink
+val Espresso = Color(0xFF221B17)         // Deep Neutral Dark Espresso
 val MutedCocoa = Color(0xFF7D564A)       // Warm Vintage Sepia / Cocoa
 val DustyRose = Color(0xFFF2846B)        // Soft Retro Coral-Rose
-val SageGreen = Color(0xFF2E7D5B)        // Vintage Emerald-Sage
+val SageGreen = Color(0xFF4F6D5A)        // Vintage Sage Green
 val WarmGold = Color(0xFFE07A1F)         // Retro Amber Gold
 
 // Legacy aliases
@@ -222,13 +224,14 @@ fun ScreenSaverView(
 
                 OutlinedButton(
                     onClick = onOpenAdmin,
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = CardCream.copy(alpha = 0.85f),
                         contentColor = Espresso
                     ),
                     border = BorderStroke(1.dp, BorderWarm),
                     shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
@@ -442,9 +445,8 @@ fun CaptureView(
         hasCameraPermission = granted
     }
 
-    val isSonyRemote = settings.cameraFacing.equals("SONY_PC_REMOTE", ignoreCase = true)
-    val isHdmiCapture = settings.cameraFacing.equals("EXTERNAL", ignoreCase = true)
-    val isExternalUsb = isSonyRemote || isHdmiCapture
+    val isExternalUsb = settings.cameraFacing.equals("EXTERNAL", ignoreCase = true) ||
+        settings.cameraFacing.equals("SONY_PC_REMOTE", ignoreCase = true)
 
     LaunchedEffect(isExternalUsb) {
         // For USB devices (Sony PC Remote or HDMI Capture), standard Android CAMERA runtime permission
@@ -543,42 +545,46 @@ fun CaptureView(
     }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
 
-    // Sony PC Remote Controller (Used for direct USB PC Remote mode OR as physical shutter trigger in HDMI mode)
-    val sonyController = remember(isSonyRemote || isHdmiCapture) {
-        if (isSonyRemote || isHdmiCapture) SonyCameraController.getInstance(context) else null
+    // External camera controllers (Sony PC Remote and HDMI UVC Capture)
+    val sonyController = remember(isExternalUsb) {
+        if (isExternalUsb) SonyCameraController.getInstance(context) else null
     }
-    val sonyState by (sonyController?.state ?: remember { mutableStateOf(SonyCameraState.NoCamera) }).let {
-        if (sonyController != null) sonyController.state.collectAsState() else remember { mutableStateOf(SonyCameraState.NoCamera) }
+    val sonyState by if (sonyController != null) {
+        sonyController.state.collectAsState()
+    } else {
+        remember { mutableStateOf<SonyCameraState>(SonyCameraState.NoCamera) }
     }
     val isSonyReady = sonyState is SonyCameraState.Ready
 
-    DisposableEffect(sonyController) {
-        sonyController?.start()
-        // In HDMI capture mode, HDMI provides the video stream, so disable USB live view frames
-        sonyController?.setLiveViewEnabled(!isHdmiCapture)
-        sonyController?.enableAutoCapture(mirror = settings.mirrorResult)
+    val hdmiController = remember(isExternalUsb) {
+        if (isExternalUsb) HdmiCaptureController.getInstance(context) else null
+    }
+    val hdmiState by if (hdmiController != null) {
+        hdmiController.state.collectAsState()
+    } else {
+        remember { mutableStateOf<HdmiCaptureState>(HdmiCaptureState.NoDevice) }
+    }
+
+    val isHdmiActive = isExternalUsb && (hdmiState !is HdmiCaptureState.NoDevice)
+
+    DisposableEffect(isExternalUsb, isHdmiActive) {
+        if (isExternalUsb) {
+            sonyController?.start()
+            sonyController?.setLiveViewEnabled(!isHdmiActive)
+            sonyController?.enableAutoCapture(mirror = settings.mirrorResult)
+            hdmiController?.start()
+            hdmiController?.setLiveViewEnabled(isHdmiActive)
+        }
         onDispose {
             sonyController?.disableAutoCapture()
             sonyController?.setLiveViewEnabled(false)
-        }
-    }
-
-    // HDMI Capture Controller (Used when isHdmiCapture is true for Sony a6000 / a6400)
-    val hdmiController = remember(isHdmiCapture) {
-        if (isHdmiCapture) HdmiCaptureController.getInstance(context) else null
-    }
-
-    DisposableEffect(hdmiController) {
-        hdmiController?.start()
-        hdmiController?.setLiveViewEnabled(true)
-        onDispose {
             hdmiController?.setLiveViewEnabled(false)
         }
     }
 
-    // Bind CameraX only if NOT using Sony PC Remote or HDMI Capture mode
-    LaunchedEffect(isSonyRemote, isHdmiCapture, settings.cameraFacing, settings.cameraResolution) {
-        if (isSonyRemote || isHdmiCapture) {
+    // Bind CameraX only if NOT using external USB camera
+    LaunchedEffect(isExternalUsb, settings.cameraFacing, settings.cameraResolution) {
+        if (isExternalUsb) {
             imageCapture = null
             cameraReady = true
             return@LaunchedEffect
@@ -700,7 +706,7 @@ fun CaptureView(
     // External Shutter Trigger (e.g. Bluetooth remote, keyboard, or UI countdown/pill tap)
     fun triggerSnap() {
         if (isCapturingNow) return
-        if (isSonyRemote && !isSonyReady) {
+        if (isExternalUsb && !isHdmiActive && !isSonyReady) {
             intermissionText = "Please wait: Sony camera connecting…"
             coroutineScope.launch {
                 delay(2000)
@@ -714,34 +720,38 @@ fun CaptureView(
             intermissionText = null
             captureErrorMsg = null
 
-            val rawBmp: Bitmap? = if (isSonyRemote && sonyController != null) {
-                try {
-                    intermissionText = "Releasing Sony shutter & downloading full-size photo…"
-                    sonyController.capture(mirror = settings.mirrorResult)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    captureErrorMsg = e.message ?: "Sony USB Capture failed"
-                    null
-                }
-            } else if (isHdmiCapture) {
-                try {
-                    if (isSonyReady && sonyController != null) {
-                        try {
-                            intermissionText = "Releasing Sony shutter & downloading photo…"
-                            sonyController.capture(mirror = settings.mirrorResult)
-                        } catch (e: Exception) {
-                            android.util.Log.w("BoothScreens", "USB shutter capture fallback to HDMI frame: ${e.message}")
+            val rawBmp: Bitmap? = if (isExternalUsb) {
+                if (isHdmiActive) {
+                    try {
+                        if (isSonyReady && sonyController != null) {
+                            try {
+                                intermissionText = "Releasing Sony shutter & downloading photo…"
+                                sonyController.capture(mirror = settings.mirrorResult)
+                            } catch (e: Exception) {
+                                android.util.Log.w("BoothScreens", "USB shutter capture fallback to HDMI frame: ${e.message}")
+                                hdmiController?.takePhoto(mirror = settings.mirrorResult)
+                            }
+                        } else {
+                            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching { BoothUtils.triggerSonyUsbShutter(context) }
+                            }
                             hdmiController?.takePhoto(mirror = settings.mirrorResult)
                         }
-                    } else {
-                        withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            runCatching { BoothUtils.triggerSonyUsbShutter(context) }
-                        }
-                        hdmiController?.takePhoto(mirror = settings.mirrorResult)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        captureErrorMsg = e.message ?: "HDMI Capture failed"
+                        null
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    captureErrorMsg = e.message ?: "HDMI Capture failed"
+                } else if (sonyController != null) {
+                    try {
+                        intermissionText = "Releasing Sony shutter & downloading full-size photo…"
+                        sonyController.capture(mirror = settings.mirrorResult)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        captureErrorMsg = e.message ?: "Sony USB Capture failed"
+                        null
+                    }
+                } else {
                     null
                 }
             } else {
@@ -786,27 +796,29 @@ fun CaptureView(
     ) {
         val isLandscape = maxWidth > maxHeight
 
-        // 1. Full-Width Live Camera Preview Viewport (Sony PC Remote OR HDMI Capture OR CameraX)
-        if (isSonyRemote && sonyController != null) {
-            SonyLiveFeed(
-                controller = sonyController,
-                mirror = settings.mirrorCamera,
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // When Sony is not ready, display clean status guidance card overlay
-            if (!isSonyReady) {
-                SonyStatusCard(
-                    state = sonyState,
+        // 1. Full-Width Live Camera Preview Viewport (External USB [HDMI or Sony] OR CameraX)
+        if (isExternalUsb) {
+            if (isHdmiActive && hdmiController != null) {
+                HdmiLiveFeed(
+                    controller = hdmiController,
+                    mirror = settings.mirrorCamera,
                     modifier = Modifier.fillMaxSize()
                 )
+            } else if (sonyController != null) {
+                SonyLiveFeed(
+                    controller = sonyController,
+                    mirror = settings.mirrorCamera,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // When Sony is not ready, display clean status guidance card overlay
+                if (!isSonyReady) {
+                    SonyStatusCard(
+                        state = sonyState,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
-        } else if (isHdmiCapture && hdmiController != null) {
-            HdmiLiveFeed(
-                controller = hdmiController,
-                mirror = settings.mirrorCamera,
-                modifier = Modifier.fillMaxSize()
-            )
         } else {
             AndroidView(
                 factory = { previewView },
@@ -847,10 +859,12 @@ fun CaptureView(
                 shape = RoundedCornerShape(50),
                 shadowElevation = 6.dp,
                 border = BorderStroke(1.dp, BorderWarm),
-                modifier = Modifier.clickable { onCancel() }
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clickable { onCancel() }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -892,6 +906,7 @@ fun CaptureView(
         )
 
         // 6. Tactile Camera Shutter Prompt Pill (Bottom Center)
+        val showSonyShutterPrompt = (isExternalUsb && !isHdmiActive) || (isHdmiActive && isSonyReady)
         Surface(
             color = CardCream.copy(alpha = 0.92f),
             shape = RoundedCornerShape(50),
@@ -901,12 +916,13 @@ fun CaptureView(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp)
-                .clickable(enabled = !isCapturingNow && !isSonyRemote) {
+                .defaultMinSize(minHeight = 48.dp)
+                .clickable(enabled = !isCapturingNow && (!isExternalUsb || isHdmiActive)) {
                     triggerSnap()
                 }
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -925,7 +941,6 @@ fun CaptureView(
                         fontSize = 13.sp
                     )
                 } else {
-                    val showSonyShutterPrompt = isSonyRemote || (isHdmiCapture && isSonyReady)
                     Box(
                         modifier = Modifier
                             .size(10.dp)
@@ -1343,8 +1358,10 @@ fun ReviewView(
                         .shadow(6.dp, RoundedCornerShape(50), spotColor = Terracotta)
                         .clip(RoundedCornerShape(50))
                         .background(RetroButtonBrush)
+                        .defaultMinSize(minHeight = 48.dp)
                         .clickable { onConfirm() }
-                        .padding(horizontal = 28.dp, vertical = 14.dp)
+                        .padding(horizontal = 28.dp, vertical = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         "TAKE THE PHOTOS!",
@@ -1358,6 +1375,7 @@ fun ReviewView(
 
                 OutlinedButton(
                     onClick = onRestartAll,
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(1.5.dp, BorderWarm),
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -1424,11 +1442,12 @@ private fun SelectedPhotoInspector(
 
                 FilledTonalButton(
                     onClick = { onRetakeSlot(validIdx) },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = DeepVermilion
                     ),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
@@ -1624,10 +1643,12 @@ private fun FullScreenPreviewDialog(
                     shape = RoundedCornerShape(50),
                     shadowElevation = 6.dp,
                     border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.7f)),
-                    modifier = Modifier.clickable { onDismiss() }
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clickable { onDismiss() }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -2033,8 +2054,10 @@ fun ResultView(
                         .shadow(6.dp, RoundedCornerShape(50), spotColor = Terracotta)
                         .clip(RoundedCornerShape(50))
                         .background(RetroButtonBrush)
+                        .defaultMinSize(minHeight = 48.dp)
                         .clickable { onRetake() }
-                        .padding(horizontal = 26.dp, vertical = 14.dp)
+                        .padding(horizontal = 26.dp, vertical = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         "TAKE MORE PHOTOS 📸",
@@ -2048,6 +2071,7 @@ fun ResultView(
 
                 OutlinedButton(
                     onClick = onHome,
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(1.5.dp, BorderWarm),
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -2141,12 +2165,14 @@ private fun QrHeroCard(
             ) {
                 FilledTonalButton(
                     onClick = onSaveGallery,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(vertical = 8.dp)
+                    contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
@@ -2155,12 +2181,14 @@ private fun QrHeroCard(
 
                 FilledTonalButton(
                     onClick = onShare,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(vertical = 8.dp)
+                    contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))

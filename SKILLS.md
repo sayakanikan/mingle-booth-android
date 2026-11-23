@@ -124,3 +124,27 @@ adb shell input tap 540 2170  # Tap Shutter Pill
 # Deploy directly to device
 ./gradlew :app:installDebug
 ```
+
+---
+
+## 🤖 Skill 6: Multi-Agent Workflow Playbook (Antigravity CLI)
+
+All agent skills live in `.agents/skills/` and are automatically discovered by Antigravity CLI (`agy`).
+
+### 6.1 Available Agent Skills
+1. **[`orchestrator`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/orchestrator/SKILL.md)**: Coordinates the 5-agent pipeline via Subagents (`invoke_subagent`) or Native Swarm (`swarm`).
+2. **[`product-manager`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/product-manager/SKILL.md)**: Produces the **Product Requirement Brief (PRB)** with YAGNI guardrails and numbered acceptance criteria.
+3. **[`system-analyst`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/system-analyst/SKILL.md)**: Produces the **Technical Spec** with file-level impact analysis and invariant checks.
+4. **[`ui-ux-designer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/ui-ux-designer/SKILL.md)**: Produces the **UI/UX Design Spec** with Compose hierarchy and retro color token mappings.
+5. **[`fullstack-developer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/fullstack-developer/SKILL.md)**: Implements Kotlin/Compose/USB/Cloud changes and verifies `./gradlew :app:assembleDebug`.
+6. **[`qa-engineer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/qa-engineer/SKILL.md)**: Verifies all acceptance criteria, `AGENTS.md` invariants, and build/ADB output (`PASS` or rework loop to `@dev`).
+
+### 6.2 How to Trigger in Antigravity CLI (`agy`)
+- **Full Workflow (All 5 Agents + Orchestrator)**:
+  > *"Use the orchestrator to plan, design, implement, and test [feature/adjustment]."*
+- **Bug Fix / Technical Adjustment (`SA ➔ Dev ➔ QA`)**:
+  > *"Run the orchestrator bugfix flow for [issue description]."*
+- **Feature Ideation (`PM ➔ SA`)**:
+  > *"Ask the product-manager and system-analyst to propose and plan the best feature for [goal]."*
+- **Parallel Swarm Board Mode**:
+  > *"Run the 5-agent swarm for [feature]."* (or use `/teamwork`)

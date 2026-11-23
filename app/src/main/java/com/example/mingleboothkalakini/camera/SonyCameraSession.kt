@@ -22,22 +22,11 @@ class SonyCameraSession(private val transport: PtpUsbTransport) {
 
     /** Connects (PTP session + Sony SDIO handshake). Throws [IOException] on failure. */
     fun connect() {
-        try {
-            openSessionAndHandshake(PROTOCOL_3_00)
-        } catch (e: Exception) {
-            Log.w("SonyPTP", "Handshake with PROTOCOL_3_00 failed (${e.message}), retrying with PROTOCOL_2_00")
-            runCatching { transport.transaction(Ptp.OC_CLOSE_SESSION) }
-            Thread.sleep(200)
-            try {
-                openSessionAndHandshake(PROTOCOL_2_00)
-            } catch (e2: Exception) {
-                throw IOException("Sony connection failed: ${e.message ?: e2.message}", e)
-            }
-        }
+        openSessionAndHandshake()
         Thread.sleep(SETTLE_AFTER_CONNECT_MS)
     }
 
-    private fun openSessionAndHandshake(protocolVersion: Int) {
+    private fun openSessionAndHandshake() {
         transport.resetTransactionId()
 
         // 1. Try OpenSession first. Retry if camera reports device busy.
@@ -61,30 +50,64 @@ class SonyCameraSession(private val transport: PtpUsbTransport) {
             throw PtpException(open.code, "Camera refused the PTP session (0x%04X)".format(open.code))
         }
 
+        // Query model before SDIO handshake so we choose the correct protocol version immediately
         runCatching {
             val info = transport.execute(Ptp.OC_GET_DEVICE_INFO).data
             parseModel(info)?.let { modelName = it }
         }
 
+        val isMode300 = isMode300Model(modelName)
+        val protocolVersion = if (isMode300) PROTOCOL_3_00 else PROTOCOL_2_00
+        Log.i("SonyPTP", "Connected Sony model: '$modelName', using protocol: 0x${protocolVersion.toString(16)} (Mode 300=$isMode300)")
+
         // 2. Sony SDIO connect phases 1 and 2
         transport.execute(OC_SDIO_CONNECT, intArrayOf(1, 0, 0))
         transport.execute(OC_SDIO_CONNECT, intArrayOf(2, 0, 0))
 
-        // 3. Extended Device Info (wait up to 2.5s for camera to prepare table)
+        // 3. Extended Device Info
         var extInfo = ByteArray(0)
-        for (attempt in 0 until 25) {
-            val params = if (protocolVersion >= PROTOCOL_3_00) intArrayOf(protocolVersion, 1) else intArrayOf(protocolVersion)
-            val res = transport.transaction(OC_SDIO_GET_EXT_DEVICE_INFO, params)
+        val paramVariants = listOf(
+            if (protocolVersion >= PROTOCOL_3_00) intArrayOf(protocolVersion, 1) else intArrayOf(protocolVersion),
+            if (protocolVersion >= PROTOCOL_3_00) intArrayOf(protocolVersion) else intArrayOf(protocolVersion, 1)
+        )
+        for (attempt in 0 until 30) {
+            val paramsToTry = paramVariants[attempt % paramVariants.size]
+            val res = transport.transaction(OC_SDIO_GET_EXT_DEVICE_INFO, paramsToTry)
             if (res.code == Ptp.RC_OK && res.data.isNotEmpty()) {
                 extInfo = res.data
+                Log.d("SonyPTP", "Received ext device info with params: ${paramsToTry.joinToString()} (size=${extInfo.size})")
                 break
             }
             Thread.sleep(100)
         }
-        if (extInfo.isEmpty()) throw IOException("Camera did not report its extended device info")
+        if (extInfo.isEmpty()) {
+            throw IOException("Camera '$modelName' did not report extended device info for protocol 0x${protocolVersion.toString(16)}")
+        }
 
         // 4. Final SDIO connect phase
         transport.execute(OC_SDIO_CONNECT, intArrayOf(3, 0, 0))
+
+        // 5. Best-effort: ensure save destination is PC + Camera (0x0011) so physical shutter transfers photos over USB
+        runCatching {
+            setStillImageSaveDestination(SAVE_DEST_PC_AND_CAMERA)
+            Log.d("SonyPTP", "Configured Still Image Save Destination to PC+Camera (0x0011)")
+        }
+    }
+
+    private fun isMode300Model(model: String): Boolean {
+        val m = model.uppercase()
+        // Mode 300 (0x012C) is strictly for 5th gen BIONZ XR bodies
+        return m.contains("6700") || m.contains("7M4") || m.contains("7RM5") ||
+               m.contains("7CR") || m.contains("7CM2") || m.contains("ILCE-1") ||
+               m.contains("FX3") || m.contains("FX30") || m.contains("ZV-E1")
+    }
+
+    /**
+     * Configures the still image save destination (PC only = 1, Camera only = 16, PC+Camera = 17).
+     */
+    fun setStillImageSaveDestination(dest: Int = SAVE_DEST_PC_AND_CAMERA) {
+        val payload = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(dest.toShort()).array()
+        transport.transaction(OC_SDIO_SET_EXT_DEVICE_PROP_VALUE, intArrayOf(PROP_STILL_SAVE_DEST), payload)
     }
 
     /**
@@ -386,14 +409,21 @@ class SonyCameraSession(private val transport: PtpUsbTransport) {
         // Sony vendor operations
         private const val OC_SDIO_CONNECT = 0x9201
         private const val OC_SDIO_GET_EXT_DEVICE_INFO = 0x9202
+        private const val OC_SDIO_SET_EXT_DEVICE_PROP_VALUE = 0x9205
         private const val OC_SDIO_CONTROL_DEVICE = 0x9207
         private const val OC_SDIO_GET_ALL_PROPS = 0x9209
 
         // Sony properties / controls
         private const val PROP_S1 = 0xD2C1 // shutter half-press
         private const val PROP_S2 = 0xD2C2 // shutter full-press
+        private const val PROP_STILL_SAVE_DEST = 0xD222 // Still Image Save Destination
         private const val PROP_FOCUS_FOUND = 0xD213
         private const val PROP_OBJECT_IN_MEMORY = 0xD215
+
+        // Save destination values
+        private const val SAVE_DEST_PC_ONLY = 0x0001
+        private const val SAVE_DEST_CAMERA_ONLY = 0x0010
+        private const val SAVE_DEST_PC_AND_CAMERA = 0x0011
 
         // Special object handles
         private const val HANDLE_IMAGE = 0xFFFFC001.toInt()

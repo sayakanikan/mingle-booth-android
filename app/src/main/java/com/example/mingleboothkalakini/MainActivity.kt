@@ -58,10 +58,12 @@ class MainActivity : ComponentActivity() {
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     Log.d("MingleUSB", "USB device attached broadcast received")
+                    usbPromptedFor = null
                     promptUsbPermissions()
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     Log.d("MingleUSB", "USB device detached broadcast received")
+                    usbPromptedFor = null
                 }
             }
         }
@@ -159,7 +161,7 @@ class MainActivity : ComponentActivity() {
                     secondary = DustyRose,
                     onSecondary = Espresso,
                     tertiary = SageGreen,
-                    background = BgCream,
+                    background = WarmSand,
                     onBackground = Espresso,
                     surface = CardCream,
                     onSurface = Espresso,
@@ -275,8 +277,8 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             onActivateFrame = { id -> viewModel.setActiveFrame(id) },
             onAddTemplateFrame = { type -> viewModel.addBuiltInFrameTemplate(type) },
             onDeleteFrame = { id -> viewModel.deleteFrameItem(id) },
-            onSaveCameraAndBranding = { facing, res, mirCam, mirRes, bg, txt, showT, showD ->
-                viewModel.saveCameraAndBranding(facing, res, mirCam, mirRes, bg, txt, showT, showD)
+            onSaveCameraAndBranding = { facing, res, mirCam, mirRes, bg, txt, showT, showD, saveLocal ->
+                viewModel.saveCameraAndBranding(facing, res, mirCam, mirRes, bg, txt, showT, showD, saveLocal)
             },
             onDeleteSession = { sess -> viewModel.deleteSessionItem(sess) },
             onFilterGalleryByEvent = { evId -> viewModel.loadAdminData(evId) },

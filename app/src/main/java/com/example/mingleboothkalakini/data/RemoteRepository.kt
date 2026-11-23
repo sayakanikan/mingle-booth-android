@@ -66,7 +66,7 @@ object RemoteRepository {
             val camDev = activeEvent.optString("camera_device_id", "FRONT").trim()
             val facing = when {
                 camDev.isBlank() || camDev == "null" -> "FRONT"
-                camDev.equals("SONY_PC_REMOTE", ignoreCase = true) -> "SONY_PC_REMOTE"
+                camDev.equals("SONY_PC_REMOTE", ignoreCase = true) -> "EXTERNAL"
                 camDev.equals("FRONT", ignoreCase = true) -> "FRONT"
                 camDev.equals("BACK", ignoreCase = true) -> "BACK"
                 camDev.equals("EXTERNAL", ignoreCase = true) -> "EXTERNAL"
@@ -81,6 +81,7 @@ object RemoteRepository {
                 cameraResolution = activeEvent.optString("camera_resolution", "1920x1080").ifBlank { "1920x1080" },
                 mirrorCamera = activeEvent.optBoolean("mirror_camera", true),
                 mirrorResult = activeEvent.optBoolean("mirror_result", true),
+                saveToLocalGallery = activeEvent.optBoolean("save_to_local_gallery", activeEvent.optBoolean("saveToLocalGallery", false)),
                 eventTitle = activeEvent.optString("title", "Mingle Booth").ifBlank { "Mingle Booth" },
                 eventSubtitle = activeEvent.optString("subtitle", "by Kala Kini").ifBlank { "by Kala Kini" },
                 brandLogoUrl = activeEvent.optString("brand_logo_data_url", "").takeIf { it.isNotBlank() && it != "null" },
@@ -136,6 +137,7 @@ object RemoteRepository {
                         cameraResolution = o.optString("camera_resolution", "1920x1080"),
                         mirrorCamera = o.optBoolean("mirror_camera", true),
                         mirrorResult = o.optBoolean("mirror_result", true),
+                        saveToLocalGallery = o.optBoolean("save_to_local_gallery", o.optBoolean("saveToLocalGallery", false)),
                         isActive = o.optBoolean("is_active", false),
                         createdAt = o.optString("created_at", ""),
                         sessionCount = sessionsArr?.length() ?: 0
@@ -263,7 +265,8 @@ object RemoteRepository {
         stripBgColor: String,
         stripTextColor: String,
         stripShowTitle: Boolean,
-        stripShowDate: Boolean
+        stripShowDate: Boolean,
+        saveToLocalGallery: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val target = eventId.ifBlank { "default" }
@@ -276,6 +279,7 @@ object RemoteRepository {
                 .put("strip_text_color", stripTextColor)
                 .put("strip_show_title", stripShowTitle)
                 .put("strip_show_date", stripShowDate)
+                .put("save_to_local_gallery", saveToLocalGallery)
             patchJson("events?id=eq.$target", payload)
             true
         } catch (e: Exception) {

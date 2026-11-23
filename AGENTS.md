@@ -45,6 +45,8 @@ The project has three distinct camera backends configured in `BoothSettings.came
 
 ### 5. Sony PTP USB Engine Invariants ([`SonyCameraSession.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/camera/SonyCameraSession.kt), [`PtpUsbTransport.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/camera/PtpUsbTransport.kt))
 - **Shift Buffer**: PTP over USB sends command/data/response packets. [`PtpUsbTransport`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/camera/PtpUsbTransport.kt) uses an internal zero-indexed shift buffer so trailing bytes from data phases are never lost during response evaluation.
+- **Protocol Version Negotiation (Mode 200 vs Mode 300)**: Sony bodies before BIONZ XR (such as `ILCE-6400`, `ILCE-6000`, `ILCE-7M3`) MUST connect with `PROTOCOL_2_00` (`0x00C8`). Sending Mode 300 (`0x012C`) causes older firmware to fail negotiation and lock the camera screen into `"Check the connected device."`. The model is resolved via `GetDeviceInfo` before SDIO handshake to choose the correct protocol on the very first attempt.
+- **Still Image Save Destination (`0xD222`)**: Automatically configured to `0x0011` (`PC+Camera`), ensuring that physical shutter button presses save the captured photo to the SD card and place the full-res JPEG in `HANDLE_IMAGE (0xffffc001)`.
 - **Physical Camera Trigger**: `checkNewPhotoAvailable()` polls `Ptp.OC_GET_OBJECT_INFO` on `HANDLE_IMAGE (0xffffc001)`. A new photo is signaled by filename/date/sequence/size changes relative to `baselineMeta`.
 - **Auto-Capture Concurrency**: Live view polling and shutter download share a single USB pipe protected by `ioMutex`. When a trigger is detected, the controller downloads the full JPEG (`downloadPhoto()`), decodes it, and emits it to `_capturedPhotoEvent`.
 
@@ -53,6 +55,21 @@ The project has three distinct camera backends configured in `BoothSettings.came
 ### 6. Photobooth Concurrency & State Machine ([`BoothScreens.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/ui/BoothScreens.kt))
 - **`isCapturingNow` Flag**: Must be set during capture, but **must NEVER block internal photo saving**. The helper `saveAndAdvancePhoto(rawBmp)` handles slot assignment, flash animation, sound effects, and step transition without triggering self-deadlocks.
 - **Single-Pose Retake**: When `retakeSlotIndex` is non-null, only that specific pose is recaptured. Once captured, the app merges the new bitmap with existing photos and immediately advances to the Review screen without clearing other shots.
+
+---
+
+### 7. Pure-Kotlin High-Fidelity Animated GIF Engine ([`BoothUtils.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/util/BoothUtils.kt))
+- **Adaptive 256-Color Median-Cut Quantization**: Never regress to fixed 3-3-2 color palettes. The encoder generates an adaptive palette tailored to the exact skin tones and lighting of the session.
+- **Floyd-Steinberg Error Diffusion Dithering**: Eliminates harsh banding and retro "filter" artifacts on skin tones and smooth gradients.
+- **15-Bit RGB Lookup Table (LUT)**: Fast $O(1)$ nearest-color lookups ($32 \times 32 \times 32$) with perceptual weighting ($2\Delta R^2 + 4\Delta G^2 + 3\Delta B^2$) ensure encoding runs in under 300ms on device.
+- **Natural Aspect Ratio**: [`buildAnimatedGif`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/util/BoothUtils.kt) automatically adapts to portrait, landscape, or square orientations without forcing a 4:3 landscape crop.
+
+---
+
+### 8. Local Device Gallery Backup Invariant ([`BoothUtils.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/util/BoothUtils.kt), [`MingleViewModel.kt`](file:///D:/MulusProject/MingleBoothAndroid/app/src/main/java/com/example/mingleboothkalakini/ui/MingleViewModel.kt))
+- **Execution Timing**: When `saveToLocalGallery` is active on the current event, the local backup (`saveSessionToLocalGallery`) MUST run **strictly before** the cloud upload process begins.
+- **Complete Backup Scope**: Backs up the rendered photostrip (`.jpg`), animated GIF (`.gif`), and every individual pose capture (`.jpg`) to the Android MediaStore under `Pictures/MingleBooth/{eventTitle}/`.
+- **Fault-Tolerant Execution**: Any filesystem or MediaStore exception is logged safely and must never crash or prevent the cloud upload from completing.
 
 ---
 
@@ -86,3 +103,24 @@ Always maintain the warm retro-photobooth visual language:
 - `CardCream` (`#FFFDF8`): Backgrounds for floating cards, pills, dialogue surfaces.
 - `WarmSand` (`#F7F3EB`): Screen background.
 - `BorderWarm` (`#E6DFD3`): Subtle card borders.
+
+---
+
+## 🤝 Multi-Agent Workflow & Orchestration (Antigravity CLI)
+
+This repository includes a 5-agent delivery team managed by an **Orchestrator** under [`.agents/skills/`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/):
+
+| Role | Subagent / Skill ID | Swarm Handle | Core Responsibility |
+| :--- | :--- | :--- | :--- |
+| **Orchestrator** | [`orchestrator`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/orchestrator/SKILL.md) | `@coordinator` | Routes tasks, manages agent handoffs, and enforces end-to-end delivery. |
+| **Product Manager** | [`product-manager`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/product-manager/SKILL.md) | `@pm` | Ideates best features, enforces YAGNI scope, and defines acceptance criteria (PRB). |
+| **System Analyst** | [`system-analyst`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/system-analyst/SKILL.md) | `@sa` | Plans features/issues/adjustments, checks `AGENTS.md` invariants, and maps target files. |
+| **UI/UX Designer** | [`ui-ux-designer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/ui-ux-designer/SKILL.md) | `@uiux` | Designs Jetpack Compose kiosk flows, touch targets (`>= 48.dp`), and retro color tokens. |
+| **Fullstack Developer** | [`fullstack-developer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/fullstack-developer/SKILL.md) | `@dev` | Implements Kotlin/Compose/USB/Cloud code and validates `./gradlew :app:assembleDebug`. |
+| **QA Engineer** | [`qa-engineer`](file:///D:/MulusProject/MingleBoothAndroid/.agents/skills/qa-engineer/SKILL.md) | `@qa` | Audits code against PRB criteria & invariants, runs build/ADB checks, and signs off or loops back to `@dev`. |
+
+### End-to-End Handoff Chain
+`User ➔ Orchestrator ➔ @pm (PRB) ➔ @sa (Tech Spec) ➔ @uiux (UI Spec) ➔ @dev (Code + Build) ⇄ @qa (Verification) ➔ Orchestrator`
+
+- **Subagent Pipeline Mode**: The Orchestrator registers agents with `define_subagent` and invokes them sequentially/parallelly via `invoke_subagent` and `send_message`.
+- **Native Swarm Mode**: The Orchestrator spawns `@pm`, `@sa`, `@uiux`, `@dev`, and `@qa` via the `swarm` tool, where agents hand off directly on the shared message board using `@mentions`.

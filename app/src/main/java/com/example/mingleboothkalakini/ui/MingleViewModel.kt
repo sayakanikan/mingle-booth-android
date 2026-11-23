@@ -1,10 +1,12 @@
 package com.example.mingleboothkalakini.ui
 
+import android.app.Application
 import android.graphics.Bitmap
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mingleboothkalakini.data.*
 import com.example.mingleboothkalakini.util.BoothUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class BoothStep {
     SCREENSAVER,
@@ -23,7 +26,7 @@ enum class BoothStep {
     ADMIN_DASHBOARD
 }
 
-class MingleViewModel : ViewModel() {
+class MingleViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _step = MutableStateFlow(BoothStep.SCREENSAVER)
     val step: StateFlow<BoothStep> = _step.asStateFlow()
@@ -203,6 +206,21 @@ class MingleViewModel : ViewModel() {
                 _processingStage.value = 1
                 _processingDetail.value = "Encoding animated GIF…"
                 val gifBytes = BoothUtils.buildAnimatedGif(photos)
+
+                // 2.5 Save Complete Backup to Local Gallery (before cloud upload)
+                if (currentSettings.saveToLocalGallery) {
+                    _processingDetail.value = "Saving backup to device gallery…"
+                    withContext(Dispatchers.IO) {
+                        BoothUtils.saveSessionToLocalGallery(
+                            context = getApplication(),
+                            sessionId = sessionId,
+                            eventTitle = currentSettings.eventTitle,
+                            stripBitmap = stripBitmap,
+                            gifBytes = gifBytes,
+                            originalPhotos = photos
+                        )
+                    }
+                }
 
                 // 3. Upload to Cloudinary & Save to Supabase
                 _processingStage.value = 2
@@ -397,7 +415,8 @@ class MingleViewModel : ViewModel() {
         stripBgColor: String,
         stripTextColor: String,
         stripShowTitle: Boolean,
-        stripShowDate: Boolean
+        stripShowDate: Boolean,
+        saveToLocalGallery: Boolean = false
     ) {
         viewModelScope.launch {
             _adminBusy.value = true
@@ -411,7 +430,8 @@ class MingleViewModel : ViewModel() {
                 stripBgColor = stripBgColor,
                 stripTextColor = stripTextColor,
                 stripShowTitle = stripShowTitle,
-                stripShowDate = stripShowDate
+                stripShowDate = stripShowDate,
+                saveToLocalGallery = saveToLocalGallery
             )
             if (ok) {
                 showToast("Settings saved!")

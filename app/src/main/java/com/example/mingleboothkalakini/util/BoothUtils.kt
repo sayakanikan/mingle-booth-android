@@ -225,26 +225,13 @@ object BoothUtils {
 
     fun getAvailableCameraOptions(context: Context): List<CameraDeviceOption> {
         val usbHint = getConnectedUsbCameraSummary(context)
-        val sonyDetected = findConnectedSonyCamera(context) != null
-        val options = mutableListOf(
-            CameraDeviceOption(
-                id = "SONY_PC_REMOTE",
-                label = if (sonyDetected) {
-                    "📸 Sony a6700 / Alpha [PC Remote USB-C Live View + Full Res]"
-                } else {
-                    "📸 Sony a6700 / Alpha (PC Remote USB-C — connect camera)"
-                },
-                isExternal = true
-            ),
-            CameraDeviceOption(
-                id = "EXTERNAL",
-                label = if (usbHint != null) {
-                    "$usbHint (Auto External / HDMI Capture)"
-                } else {
-                    "📡 External UVC / HDMI Capture Card"
-                },
-                isExternal = true
-            ),
+        val externalLabel = if (usbHint != null) {
+            "$usbHint (External USB Camera)"
+        } else {
+            "📸 External Camera (Auto-Detect: Sony PC Remote / HDMI UVC)"
+        }
+
+        return listOf(
             CameraDeviceOption(
                 id = "FRONT",
                 label = "🤳 Built-in Front Camera",
@@ -254,40 +241,13 @@ object BoothUtils {
                 id = "BACK",
                 label = "📷 Built-in Back Camera",
                 isExternal = false
+            ),
+            CameraDeviceOption(
+                id = "EXTERNAL",
+                label = externalLabel,
+                isExternal = true
             )
         )
-
-        try {
-            val cm = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
-            if (cm != null) {
-                for (camId in cm.cameraIdList) {
-                    val chars = cm.getCameraCharacteristics(camId)
-                    val facing = chars.get(CameraCharacteristics.LENS_FACING)
-                    val isExt = facing == CameraCharacteristics.LENS_FACING_EXTERNAL ||
-                        (facing != CameraCharacteristics.LENS_FACING_FRONT && facing != CameraCharacteristics.LENS_FACING_BACK) ||
-                        (camId.toIntOrNull() ?: 0) >= 2
-
-                    val typeLabel = when (facing) {
-                        CameraCharacteristics.LENS_FACING_EXTERNAL ->
-                            usbHint ?: "📸 External USB / Capture Card"
-                        CameraCharacteristics.LENS_FACING_FRONT -> "🤳 Front Lens"
-                        CameraCharacteristics.LENS_FACING_BACK -> "📷 Back Lens"
-                        else -> "📡 External Feed"
-                    }
-
-                    options.add(
-                        CameraDeviceOption(
-                            id = "ID:$camId",
-                            label = "$typeLabel (Camera ID #$camId)",
-                            isExternal = isExt
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
-
-        return options
     }
 
     @SuppressLint("UnsafeOptInUsageError")
@@ -588,14 +548,29 @@ object BoothUtils {
 
     suspend fun buildAnimatedGif(
         photos: List<Bitmap>,
-        width: Int = 480,
-        height: Int = 360,
-        delayMs: Int = 700
+        width: Int = 0,
+        height: Int = 0,
+        delayMs: Int = 650
     ): ByteArray? = withContext(Dispatchers.Default) {
         if (photos.isEmpty()) return@withContext null
         try {
+            val first = photos.first()
+            val (targetW, targetH) = if (width > 0 && height > 0) {
+                width to height
+            } else {
+                val maxDim = 540
+                if (first.width >= first.height) {
+                    val w = maxDim
+                    val h = ((maxDim.toFloat() * first.height) / first.width).roundToInt()
+                    (w and 1.inv()) to (h and 1.inv())
+                } else {
+                    val h = maxDim
+                    val w = ((maxDim.toFloat() * first.width) / first.height).roundToInt()
+                    (w and 1.inv()) to (h and 1.inv())
+                }
+            }
             val scaledFrames = photos.map { photo ->
-                centerCropBitmap(photo, width, height)
+                centerCropBitmap(photo, targetW, targetH)
             }
             SimpleGifEncoder.encode(scaledFrames, delayMs)
         } catch (e: Exception) {
@@ -640,23 +615,100 @@ object BoothUtils {
         fallback
     }
 
-    fun saveBitmapToGallery(context: Context, bitmap: Bitmap, filename: String): Boolean {
+    fun saveBitmapToGallery(
+        context: Context,
+        bitmap: Bitmap,
+        filename: String,
+        subFolder: String? = null,
+        quality: Int = 95
+    ): Boolean {
         return try {
+            val relativeDir = buildString {
+                append(Environment.DIRECTORY_PICTURES)
+                append("/MingleBooth")
+                if (!subFolder.isNullOrBlank()) {
+                    append("/${subFolder.trim().replace(Regex("[^a-zA-Z0-9_-]"), "_")}")
+                }
+            }
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, filename)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/MingleBooth")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, relativeDir)
                 }
             }
             val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
             context.contentResolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
             }
             true
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    fun saveBytesToGallery(
+        context: Context,
+        bytes: ByteArray,
+        filename: String,
+        mimeType: String = "image/gif",
+        subFolder: String? = null
+    ): Boolean {
+        return try {
+            val relativeDir = buildString {
+                append(Environment.DIRECTORY_PICTURES)
+                append("/MingleBooth")
+                if (!subFolder.isNullOrBlank()) {
+                    append("/${subFolder.trim().replace(Regex("[^a-zA-Z0-9_-]"), "_")}")
+                }
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, mimeType)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, relativeDir)
+                }
+            }
+            val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(bytes)
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
+     * Saves a complete backup of the session assets (photostrip, animated GIF, and all original poses)
+     * directly into the device's Pictures gallery (MediaStore) under Pictures/MingleBooth/{eventTitle}/.
+     */
+    fun saveSessionToLocalGallery(
+        context: Context,
+        sessionId: String,
+        eventTitle: String,
+        stripBitmap: Bitmap,
+        gifBytes: ByteArray?,
+        originalPhotos: List<Bitmap>
+    ) {
+        val safeTitle = eventTitle.trim().replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "Event" }
+
+        // 1. Save Photostrip
+        val stripFileName = "Mingle_${safeTitle}_${sessionId}_strip.jpg"
+        saveBitmapToGallery(context, stripBitmap, stripFileName, subFolder = safeTitle, quality = 95)
+
+        // 2. Save Animated GIF
+        if (gifBytes != null && gifBytes.isNotEmpty()) {
+            val gifFileName = "Mingle_${safeTitle}_${sessionId}_animation.gif"
+            saveBytesToGallery(context, gifBytes, gifFileName, mimeType = "image/gif", subFolder = safeTitle)
+        }
+
+        // 3. Save All Original Photo Poses
+        originalPhotos.forEachIndexed { idx, poseBitmap ->
+            val poseFileName = "Mingle_${safeTitle}_${sessionId}_pose_${idx + 1}.jpg"
+            saveBitmapToGallery(context, poseBitmap, poseFileName, subFolder = safeTitle, quality = 92)
         }
     }
 
@@ -942,7 +994,9 @@ object BoothUtils {
 }
 
 /**
- * Compact 256-color GIF89a animated encoder with 3-3-2 RGB global palette & LZW compression.
+ * High-fidelity 256-color GIF89a animated encoder.
+ * Uses adaptive Median-Cut color quantization, 15-bit RGB nearest-match lookup table (LUT),
+ * Floyd-Steinberg error diffusion dithering, and GIF89a LZW encoding.
  */
 object SimpleGifEncoder {
     fun encode(frames: List<Bitmap>, delayMs: Int): ByteArray {
@@ -950,7 +1004,11 @@ object SimpleGifEncoder {
         val h = frames.first().height
         val out = ByteArrayOutputStream()
 
-        // Header
+        // 1. Build an adaptive 256-color palette from sampled frame pixels
+        val palette = generatePalette(frames, 256)
+        val lut = buildLookupTable(palette)
+
+        // 2. GIF Header
         out.write("GIF89a".toByteArray(Charsets.US_ASCII))
         writeShort(out, w)
         writeShort(out, h)
@@ -958,17 +1016,15 @@ object SimpleGifEncoder {
         out.write(0)    // Background color
         out.write(0)    // Pixel aspect ratio
 
-        // 3-3-2 RGB Global Color Table (256 * 3 bytes)
+        // 3. Global Color Table (256 * 3 bytes)
         for (i in 0 until 256) {
-            val r = ((i shr 5) and 0x07) * 255 / 7
-            val g = ((i shr 2) and 0x07) * 255 / 7
-            val b = (i and 0x03) * 255 / 3
-            out.write(r)
-            out.write(g)
-            out.write(b)
+            val c = palette[i]
+            out.write((c shr 16) and 0xFF)
+            out.write((c shr 8) and 0xFF)
+            out.write(c and 0xFF)
         }
 
-        // Netscape Application Extension for infinite looping
+        // 4. Netscape Application Extension for infinite looping
         out.write(0x21)
         out.write(0xFF)
         out.write(11)
@@ -978,6 +1034,7 @@ object SimpleGifEncoder {
         writeShort(out, 0) // Loop forever
         out.write(0)
 
+        // Pause on the final pose for 2x delay before looping
         val allFrames = frames + frames.last()
         for (idx in allFrames.indices) {
             val frame = allFrames[idx]
@@ -1000,23 +1057,246 @@ object SimpleGifEncoder {
             writeShort(out, h)
             out.write(0) // No local color table, not interlaced
 
-            // Quantize pixels to 3-3-2 palette indices
-            val argb = IntArray(w * h)
-            frame.getPixels(argb, 0, w, 0, 0, w, h)
-            val indexed = ByteArray(w * h)
-            for (p in argb.indices) {
-                val c = argb[p]
-                val r = ((c shr 16) and 0xFF) * 7 / 255
-                val g = ((c shr 8) and 0xFF) * 7 / 255
-                val b = (c and 0xFF) * 3 / 255
-                indexed[p] = ((r shl 5) or (g shl 2) or b).toByte()
-            }
-
+            // Quantize pixels using LUT and Floyd-Steinberg error diffusion dithering
+            val indexed = quantizeWithDithering(frame, palette, lut)
             lzwEncode(out, indexed)
         }
 
         out.write(0x3B) // Trailer
         return out.toByteArray()
+    }
+
+    private class ColorBox(val colors: IntArray, val start: Int, val end: Int) : Comparable<ColorBox> {
+        var minR = 255; var maxR = 0
+        var minG = 255; var maxG = 0
+        var minB = 255; var maxB = 0
+
+        init {
+            for (i in start until end) {
+                val c = colors[i]
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
+                if (r < minR) minR = r
+                if (r > maxR) maxR = r
+                if (g < minG) minG = g
+                if (g > maxG) maxG = g
+                if (b < minB) minB = b
+                if (b > maxB) maxB = b
+            }
+        }
+
+        val count: Int get() = end - start
+        val volume: Int get() = maxOf(maxR - minR, maxG - minG, maxB - minB)
+
+        override fun compareTo(other: ColorBox): Int = other.volume.compareTo(this.volume)
+
+        fun averageColor(): Int {
+            if (count == 0) return 0
+            var tr = 0L
+            var tg = 0L
+            var tb = 0L
+            for (i in start until end) {
+                val c = colors[i]
+                tr += (c shr 16) and 0xFF
+                tg += (c shr 8) and 0xFF
+                tb += c and 0xFF
+            }
+            val ar = (tr / count).toInt().coerceIn(0, 255)
+            val ag = (tg / count).toInt().coerceIn(0, 255)
+            val ab = (tb / count).toInt().coerceIn(0, 255)
+            return (ar shl 16) or (ag shl 8) or ab
+        }
+    }
+
+    private fun generatePalette(frames: List<Bitmap>, maxColors: Int = 256): IntArray {
+        val samples = ArrayList<Int>(20000)
+        val step = 8
+        for (frame in frames) {
+            val w = frame.width
+            val h = frame.height
+            val pixels = IntArray(w * h)
+            frame.getPixels(pixels, 0, w, 0, 0, w, h)
+            var p = 0
+            while (p < pixels.size) {
+                samples.add(pixels[p] and 0x00FFFFFF)
+                p += step
+            }
+        }
+
+        if (samples.isEmpty()) {
+            return IntArray(maxColors)
+        }
+
+        val colors = samples.toIntArray()
+        val queue = java.util.PriorityQueue<ColorBox>()
+        queue.add(ColorBox(colors, 0, colors.size))
+
+        while (queue.size < maxColors) {
+            val box = queue.poll() ?: break
+            if (box.count <= 1 || box.volume == 0) {
+                queue.add(box)
+                break
+            }
+
+            val rRange = box.maxR - box.minR
+            val gRange = box.maxG - box.minG
+            val bRange = box.maxB - box.minB
+
+            val channel = when {
+                rRange >= gRange && rRange >= bRange -> 0
+                gRange >= rRange && gRange >= bRange -> 1
+                else -> 2
+            }
+
+            sortColorsByChannel(colors, box.start, box.end - 1, channel)
+            val mid = (box.start + box.end) / 2
+            queue.add(ColorBox(colors, box.start, mid))
+            queue.add(ColorBox(colors, mid, box.end))
+        }
+
+        val palette = IntArray(maxColors)
+        var idx = 0
+        while (queue.isNotEmpty() && idx < maxColors) {
+            val b = queue.poll() ?: break
+            palette[idx++] = b.averageColor()
+        }
+        val lastColor = if (idx > 0) palette[idx - 1] else 0
+        while (idx < maxColors) {
+            palette[idx++] = lastColor
+        }
+        return palette
+    }
+
+    private fun sortColorsByChannel(a: IntArray, low: Int, high: Int, channel: Int) {
+        if (low >= high) return
+        val pivotVal = getChannel(a[(low + high) ushr 1], channel)
+        var i = low
+        var j = high
+        while (i <= j) {
+            while (getChannel(a[i], channel) < pivotVal) i++
+            while (getChannel(a[j], channel) > pivotVal) j--
+            if (i <= j) {
+                val tmp = a[i]
+                a[i] = a[j]
+                a[j] = tmp
+                i++
+                j--
+            }
+        }
+        if (low < j) sortColorsByChannel(a, low, j, channel)
+        if (i < high) sortColorsByChannel(a, i, high, channel)
+    }
+
+    private fun getChannel(c: Int, channel: Int): Int {
+        return when (channel) {
+            0 -> (c shr 16) and 0xFF // Red
+            1 -> (c shr 8) and 0xFF  // Green
+            else -> c and 0xFF       // Blue
+        }
+    }
+
+    private fun buildLookupTable(palette: IntArray): ByteArray {
+        val lut = ByteArray(32768)
+        val palR = IntArray(256) { (palette[it] shr 16) and 0xFF }
+        val palG = IntArray(256) { (palette[it] shr 8) and 0xFF }
+        val palB = IntArray(256) { palette[it] and 0xFF }
+
+        for (r5 in 0 until 32) {
+            val r = (r5 * 255) / 31
+            for (g5 in 0 until 32) {
+                val g = (g5 * 255) / 31
+                for (b5 in 0 until 32) {
+                    val b = (b5 * 255) / 31
+                    var bestIdx = 0
+                    var bestDist = Long.MAX_VALUE
+                    for (i in 0 until 256) {
+                        val dr = r - palR[i]
+                        val dg = g - palG[i]
+                        val db = b - palB[i]
+                        val dist = (2L * dr * dr) + (4L * dg * dg) + (3L * db * db)
+                        if (dist < bestDist) {
+                            bestDist = dist
+                            bestIdx = i
+                        }
+                    }
+                    val lutIndex = (r5 shl 10) or (g5 shl 5) or b5
+                    lut[lutIndex] = bestIdx.toByte()
+                }
+            }
+        }
+        return lut
+    }
+
+    private fun quantizeWithDithering(
+        frame: Bitmap,
+        palette: IntArray,
+        lut: ByteArray
+    ): ByteArray {
+        val w = frame.width
+        val h = frame.height
+        val argb = IntArray(w * h)
+        frame.getPixels(argb, 0, w, 0, 0, w, h)
+        val indexed = ByteArray(w * h)
+
+        var currErrR = IntArray(w + 2)
+        var currErrG = IntArray(w + 2)
+        var currErrB = IntArray(w + 2)
+        var nextErrR = IntArray(w + 2)
+        var nextErrG = IntArray(w + 2)
+        var nextErrB = IntArray(w + 2)
+
+        for (y in 0 until h) {
+            nextErrR.fill(0)
+            nextErrG.fill(0)
+            nextErrB.fill(0)
+
+            for (x in 0 until w) {
+                val c = argb[y * w + x]
+                val origR = (c shr 16) and 0xFF
+                val origG = (c shr 8) and 0xFF
+                val origB = c and 0xFF
+
+                val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
+                val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
+                val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
+
+                val r5 = (r shr 3).coerceIn(0, 31)
+                val g5 = (g shr 3).coerceIn(0, 31)
+                val b5 = (b shr 3).coerceIn(0, 31)
+                val lutIdx = (r5 shl 10) or (g5 shl 5) or b5
+                val colorIdx = lut[lutIdx].toInt() and 0xFF
+
+                indexed[y * w + x] = colorIdx.toByte()
+
+                val palCol = palette[colorIdx]
+                val errR = r - ((palCol shr 16) and 0xFF)
+                val errG = g - ((palCol shr 8) and 0xFF)
+                val errB = b - (palCol and 0xFF)
+
+                currErrR[x + 2] += (errR * 7) shr 4
+                currErrG[x + 2] += (errG * 7) shr 4
+                currErrB[x + 2] += (errB * 7) shr 4
+
+                nextErrR[x] += (errR * 3) shr 4
+                nextErrG[x] += (errG * 3) shr 4
+                nextErrB[x] += (errB * 3) shr 4
+
+                nextErrR[x + 1] += (errR * 5) shr 4
+                nextErrG[x + 1] += (errG * 5) shr 4
+                nextErrB[x + 1] += (errB * 5) shr 4
+
+                nextErrR[x + 2] += (errR * 1) shr 4
+                nextErrG[x + 2] += (errG * 1) shr 4
+                nextErrB[x + 2] += (errB * 1) shr 4
+            }
+
+            val tmpR = currErrR; currErrR = nextErrR; nextErrR = tmpR
+            val tmpG = currErrG; currErrG = nextErrG; nextErrG = tmpG
+            val tmpB = currErrB; currErrB = nextErrB; nextErrB = tmpB
+        }
+
+        return indexed
     }
 
     private fun lzwEncode(out: ByteArrayOutputStream, pixels: ByteArray) {

@@ -48,6 +48,7 @@ data class EventItem(
     val cameraResolution: String,
     val mirrorCamera: Boolean,
     val mirrorResult: Boolean,
+    val saveToLocalGallery: Boolean = false,
     val isActive: Boolean,
     val createdAt: String,
     val sessionCount: Int = 0
@@ -84,6 +85,7 @@ data class BoothSettings(
     val cameraResolution: String = "1920x1080",
     val mirrorCamera: Boolean = true,
     val mirrorResult: Boolean = true,
+    val saveToLocalGallery: Boolean = false,
     val eventTitle: String = "Mingle Booth",
     val eventSubtitle: String = "by Kala Kini",
     val brandLogoUrl: String? = null,

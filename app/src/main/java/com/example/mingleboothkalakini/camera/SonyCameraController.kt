@@ -212,15 +212,15 @@ class SonyCameraController private constructor(context: Context) {
 
                 if (newMeta != null) {
                     Log.i(TAG, "Physical camera trigger detected! Downloading: $newMeta")
-                    currentBaselineMeta = newMeta
                     try {
                         val jpeg = ioMutex.withLock { s.downloadPhoto() }
+                        currentBaselineMeta = ioMutex.withLock { s.sampleBaselineMeta() } ?: newMeta
                         val bmp = decodeJpeg(jpeg, mirrorCapturedPhotos)
                         _capturedPhotoEvent.emit(bmp)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed downloading photo after camera trigger: ${e.message}", e)
                     }
-                    delay(250)
+                    delay(300)
                     continue
                 }
             }

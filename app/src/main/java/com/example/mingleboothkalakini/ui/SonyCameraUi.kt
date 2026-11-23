@@ -59,17 +59,20 @@ fun SonyLiveFeed(
 /** Title + hint for a non-ready camera state. */
 fun describeSonyState(state: SonyCameraState): Pair<String, String> = when (state) {
     SonyCameraState.NoCamera -> "Sony camera not detected" to
-        "Connect the camera with a USB-C to USB-C cable (for a6700) or Micro-USB (for a6000/a6400), " +
-        "switch it on, and set Setup ▸ USB ▸ USB Connection Mode ▸ PC Remote.\n" +
-        "(If using HDMI Capture Card on a6000/a6400, select 'External UVC / HDMI Capture' in Admin instead of 'Sony a6700 PC Remote')."
+        "Connect camera via Micro-USB (a6400) or USB-C (a6700) with a data-capable USB OTG cable.\n" +
+        "Ensure camera is powered ON and set to Setup ▸ USB Connection ▸ PC Remote."
     SonyCameraState.NeedsPermission -> "USB permission needed" to
         "Tap “Allow” on the Android USB dialog (tick “Use by default” so it won't ask again)."
     SonyCameraState.WrongMode -> "Camera is not in PC Remote mode" to
-        "Set the camera to Setup ▸ USB ▸ USB Connection Mode ▸ PC Remote (not USB Streaming / Mass Storage)."
-    SonyCameraState.Connecting -> "Connecting to camera…" to "Starting the PC Remote session."
-    is SonyCameraState.Ready -> state.model to "Camera ready"
-    is SonyCameraState.Error -> "Camera connection problem" to
-        "${state.message}\nReconnecting automatically…"
+        "Set camera to Setup ▸ USB Connection ▸ PC Remote.\n" +
+        "On a6400: also set Network ▸ Ctrl w/ Smartphone ▸ OFF."
+    SonyCameraState.Connecting -> "Connecting to camera…" to "Establishing Sony PC Remote session…"
+    is SonyCameraState.Ready -> state.model to "Camera ready • Press shutter on camera body to shoot!"
+    is SonyCameraState.Error -> "Camera connection issue" to
+        "${state.message}\nIf camera displays 'Check connected device', set:\n" +
+        "1. Network ▸ Ctrl w/ Smartphone ▸ OFF\n" +
+        "2. Setup ▸ USB Connection ▸ PC Remote\n" +
+        "3. Setup ▸ PC Remote Settings ▸ Still Img. Save Dest. ▸ PC+Camera"
 }
 
 /** Centered status card shown in place of the live view while the Sony camera is unavailable. */

@@ -171,7 +171,7 @@ fun AdminDashboardScreen(
     onActivateFrame: (String) -> Unit,
     onAddTemplateFrame: (String) -> Unit,
     onDeleteFrame: (String) -> Unit,
-    onSaveCameraAndBranding: (String, String, Boolean, Boolean, String, String, Boolean, Boolean) -> Unit,
+    onSaveCameraAndBranding: (String, String, Boolean, Boolean, String, String, Boolean, Boolean, Boolean) -> Unit,
     onDeleteSession: (PhotoSessionItem) -> Unit,
     onFilterGalleryByEvent: (String?) -> Unit,
     onReturnToBooth: () -> Unit,
@@ -743,7 +743,7 @@ private fun FrameRowCard(
 private fun CameraAndBrandingTab(
     settings: BoothSettings,
     isBusy: Boolean,
-    onSave: (String, String, Boolean, Boolean, String, String, Boolean, Boolean) -> Unit
+    onSave: (String, String, Boolean, Boolean, String, String, Boolean, Boolean, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -756,6 +756,7 @@ private fun CameraAndBrandingTab(
     var textColor by remember(settings.stripTextColor) { mutableStateOf(settings.stripTextColor) }
     var showTitle by remember(settings.stripShowTitle) { mutableStateOf(settings.stripShowTitle) }
     var showDate by remember(settings.stripShowDate) { mutableStateOf(settings.stripShowDate) }
+    var saveToLocalGallery by remember(settings.saveToLocalGallery) { mutableStateOf(settings.saveToLocalGallery) }
 
     var cameraOptions by remember { mutableStateOf(BoothUtils.getAvailableCameraOptions(context)) }
     var usbSummary by remember { mutableStateOf(BoothUtils.getConnectedUsbCameraSummary(context)) }
@@ -766,6 +767,7 @@ private fun CameraAndBrandingTab(
     // Live-refresh USB state so the Grant / Test buttons react to plug-in and permission changes
     LaunchedEffect(Unit) {
         while (true) {
+            cameraOptions = BoothUtils.getAvailableCameraOptions(context)
             usbSummary = BoothUtils.getConnectedUsbCameraSummary(context)
             usbRaw = BoothUtils.describeAllUsbDevices(context)
             sonyConnected = BoothUtils.findConnectedSonyCamera(context) != null
@@ -785,38 +787,44 @@ private fun CameraAndBrandingTab(
         }
     }
 
-    val isSonyRemoteFacing = facing.equals("SONY_PC_REMOTE", ignoreCase = true)
-    val isHdmiCaptureFacing = facing.equals("EXTERNAL", ignoreCase = true)
+    val isExternalFacing = facing.equals("EXTERNAL", ignoreCase = true) ||
+        facing.equals("SONY_PC_REMOTE", ignoreCase = true)
 
-    val adminSonyController = remember(isTestingCamera, isSonyRemoteFacing) {
-        if (isTestingCamera && isSonyRemoteFacing) SonyCameraController.getInstance(context) else null
+    val adminSonyController = remember(isTestingCamera, isExternalFacing) {
+        if (isTestingCamera && isExternalFacing) SonyCameraController.getInstance(context) else null
     }
-    val adminSonyState by (adminSonyController?.state ?: remember { mutableStateOf(SonyCameraState.NoCamera) }).let {
-        if (adminSonyController != null) adminSonyController.state.collectAsState() else remember { mutableStateOf(SonyCameraState.NoCamera) }
+    val adminSonyState by if (adminSonyController != null) {
+        adminSonyController.state.collectAsState()
+    } else {
+        remember { mutableStateOf<SonyCameraState>(SonyCameraState.NoCamera) }
     }
 
-    DisposableEffect(adminSonyController) {
-        adminSonyController?.start()
-        adminSonyController?.setLiveViewEnabled(true)
+    val adminHdmiController = remember(isTestingCamera, isExternalFacing) {
+        if (isTestingCamera && isExternalFacing) HdmiCaptureController.getInstance(context) else null
+    }
+    val adminHdmiState by if (adminHdmiController != null) {
+        adminHdmiController.state.collectAsState()
+    } else {
+        remember { mutableStateOf<HdmiCaptureState>(HdmiCaptureState.NoDevice) }
+    }
+
+    val isAdminHdmiActive = isExternalFacing && (adminHdmiState !is HdmiCaptureState.NoDevice)
+
+    DisposableEffect(isTestingCamera, isExternalFacing, isAdminHdmiActive) {
+        if (isTestingCamera && isExternalFacing) {
+            adminSonyController?.start()
+            adminSonyController?.setLiveViewEnabled(!isAdminHdmiActive)
+            adminHdmiController?.start()
+            adminHdmiController?.setLiveViewEnabled(isAdminHdmiActive)
+        }
         onDispose {
             adminSonyController?.setLiveViewEnabled(false)
-        }
-    }
-
-    val adminHdmiController = remember(isTestingCamera, isHdmiCaptureFacing) {
-        if (isTestingCamera && isHdmiCaptureFacing) HdmiCaptureController.getInstance(context) else null
-    }
-
-    DisposableEffect(adminHdmiController) {
-        adminHdmiController?.start()
-        adminHdmiController?.setLiveViewEnabled(true)
-        onDispose {
             adminHdmiController?.setLiveViewEnabled(false)
         }
     }
 
-    LaunchedEffect(isTestingCamera, facing, isSonyRemoteFacing, isHdmiCaptureFacing) {
-        if (isSonyRemoteFacing || isHdmiCaptureFacing) {
+    LaunchedEffect(isTestingCamera, facing, isExternalFacing) {
+        if (isExternalFacing) {
             // CameraX is not bound when previewing Sony via USB-C PC Remote or HDMI Capture
             runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
             testCameraError = null
@@ -895,10 +903,11 @@ private fun CameraAndBrandingTab(
                             cameraOptions = BoothUtils.getAvailableCameraOptions(context)
                             usbSummary = BoothUtils.getConnectedUsbCameraSummary(context)
                         },
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(50),
                         border = BorderStroke(1.dp, BorderWarm),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
@@ -965,9 +974,10 @@ private fun CameraAndBrandingTab(
                                             onClick = {
                                                 BoothUtils.requestSonyUsbPermission(context)
                                             },
+                                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                             colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
                                             shape = RoundedCornerShape(50),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
                                         ) {
                                             Text("Grant USB Access", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                         }
@@ -999,9 +1009,10 @@ private fun CameraAndBrandingTab(
                                                 }
                                             }
                                         },
+                                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                         shape = RoundedCornerShape(50),
                                         border = BorderStroke(1.dp, Terracotta),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
                                     ) {
                                         Text("⚡ Test Shutter / Flash", color = Terracotta, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -1014,7 +1025,7 @@ private fun CameraAndBrandingTab(
                 Text("Camera Source / Device", color = Espresso, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     cameraOptions.forEach { option ->
-                        val isSelected = facing == option.id
+                        val isSelected = facing == option.id || (option.id == "EXTERNAL" && facing.equals("SONY_PC_REMOTE", ignoreCase = true))
                         Surface(
                             onClick = { facing = option.id },
                             shape = RoundedCornerShape(12.dp),
@@ -1023,10 +1034,12 @@ private fun CameraAndBrandingTab(
                                 1.dp,
                                 if (isSelected) Terracotta else BorderWarm
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -1070,6 +1083,7 @@ private fun CameraAndBrandingTab(
                         FilterChip(
                             selected = resolution == res,
                             onClick = { resolution = res },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                             label = { Text(label) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = SoftPeach,
@@ -1125,11 +1139,13 @@ private fun CameraAndBrandingTab(
                     }
                     Button(
                         onClick = { isTestingCamera = !isTestingCamera },
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isTestingCamera) Color(0xFFDC2626) else Terracotta,
                             contentColor = Color.White
                         ),
-                        shape = RoundedCornerShape(50)
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Text(if (isTestingCamera) "⏹ Stop Feed" else "▶ Test Camera", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
@@ -1149,24 +1165,26 @@ private fun CameraAndBrandingTab(
                             .border(2.dp, BorderWarm, RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isSonyRemoteFacing && adminSonyController != null) {
-                            SonyLiveFeed(
-                                controller = adminSonyController,
-                                mirror = mirrorCamera,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                            if (adminSonyState !is SonyCameraState.Ready) {
-                                SonyStatusCard(
-                                    state = adminSonyState,
+                        if (isExternalFacing) {
+                            if (isAdminHdmiActive && adminHdmiController != null) {
+                                HdmiLiveFeed(
+                                    controller = adminHdmiController,
+                                    mirror = mirrorCamera,
                                     modifier = Modifier.fillMaxSize()
                                 )
+                            } else if (adminSonyController != null) {
+                                SonyLiveFeed(
+                                    controller = adminSonyController,
+                                    mirror = mirrorCamera,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (adminSonyState !is SonyCameraState.Ready) {
+                                    SonyStatusCard(
+                                        state = adminSonyState,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
-                        } else if (isHdmiCaptureFacing && adminHdmiController != null) {
-                            HdmiLiveFeed(
-                                controller = adminHdmiController,
-                                mirror = mirrorCamera,
-                                modifier = Modifier.fillMaxSize()
-                            )
                         } else {
                             AndroidView(
                                 factory = { previewView },
@@ -1257,6 +1275,7 @@ private fun CameraAndBrandingTab(
                             FilterChip(
                                 selected = guideSection == idx,
                                 onClick = { guideSection = idx },
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                 label = { Text(title, fontSize = 12.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = SoftPeach,
@@ -1279,18 +1298,18 @@ private fun CameraAndBrandingTab(
                         ) {
                             when (guideSection) {
                                 0 -> {
-                                    Text("Single USB-C to USB-C Cable (Sony a6700 Direct Integration):", color = Terracotta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("• Connect your Xiaomi Redmi Pad 2 directly to the Sony a6700 using a quality USB-C to USB-C cable (or through a powered USB-C hub).\n• Camera Power: Powered by camera NP-FZ100 battery.\n• Camera USB Mode: Set to PC Remote.\n• Delivers full Live Preview stream AND full-resolution captured photo downloads straight over the single USB-C cable!\n• No capture card or HDMI cable needed.", color = Espresso, fontSize = 12.sp)
+                                    Text("Single Micro-USB / USB-C Cable (Direct OTG Connection):", color = Terracotta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("• Sony a6400: Connect camera Micro-USB port to tablet USB-C port using a USB OTG data cable.\n• Sony a6700: Connect camera USB-C port directly to tablet USB-C port.\n• Delivers full Live Preview stream AND full-resolution photo downloads straight over the single USB cable!\n• No capture card or HDMI cable needed.", color = Espresso, fontSize = 12.sp)
                                     Spacer(Modifier.height(6.dp))
-                                    Text("Sony a6000 & Sony a6400 (Legacy Dual Hub Connection):", color = Espresso, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("• Connect a USB-C Hub to your tablet.\n• Plug 1 (Live Preview): Micro-HDMI from camera → HDMI Capture Card → USB Hub.\n• Plug 2 (Shutter & Flash Trigger): Micro-USB from camera (in PC Remote mode) → USB Hub.", color = MutedCocoa, fontSize = 12.sp)
+                                    Text("Optional Dual Hub Connection (Alternative for a6000 / a6400):", color = Espresso, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("• If you prefer HDMI for 60fps hardware video feed: Connect USB Hub to tablet. Plug 1 (Video): Micro-HDMI → HDMI Capture Card. Plug 2 (Shutter/Photo Transfer): Micro-USB → USB Hub.", color = MutedCocoa, fontSize = 12.sp)
                                 }
                                 1 -> {
-                                    Text("1. Sony a6700 USB Menu Setup:", color = Terracotta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("• MENU → Setup (🧰) → USB → USB Connection Mode → PC Remote\n• MENU → Setup (🧰) → USB → USB Power Supply → Off (to prevent drawing power from your tablet battery)\n• MENU → Network (🌐) → Cnct./PC Remote → PC Remote Function → PC Remote → ON", color = Espresso, fontSize = 12.sp)
+                                    Text("1. Sony a6400 Menu Checklist (CRITICAL):", color = Terracotta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("• MENU → Network (🌐) → [Ctrl w/ Smartphone] → Set to [OFF] (If ON, PC Remote is blocked!)\n• MENU → Setup (🧰) → [USB Connection] → Set to [PC Remote] (Do NOT use Auto or Mass Storage)\n• MENU → Setup (🧰) → [PC Remote Settings] → [Still Img. Save Dest.] → Set to [PC+Camera] (Ensures camera shutter sends photo to app)\n• MENU → Setup (🧰) → [USB Power Supply] → Set to [OFF]", color = Espresso, fontSize = 12.sp)
                                     Spacer(Modifier.height(4.dp))
-                                    Text("2. Photo Save Destination on Camera:", color = Espresso, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text("• MENU → Network (🌐) → Cnct./PC Remote → PC Remote Function → Still Img. Save Dest. → PC+Camera (or PC Only). This ensures the high-resolution JPEG is transferred to the tablet immediately after shutter release.", color = MutedCocoa, fontSize = 12.sp)
+                                    Text("2. Sony a6700 Menu Checklist:", color = Espresso, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("• MENU → Setup (🧰) → USB → USB Connection Mode → PC Remote\n• MENU → Network (🌐) → Cnct./PC Remote → PC Remote Function → PC Remote → ON\n• MENU → Network (🌐) → Cnct./PC Remote → PC Remote Function → Still Img. Save Dest. → PC+Camera", color = MutedCocoa, fontSize = 12.sp)
                                 }
                                 2 -> {
                                     Text("External Studio Flash / Hot-Shoe Strobe (Godox):", color = Terracotta, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -1385,14 +1404,39 @@ private fun CameraAndBrandingTab(
                     )
                 }
 
+                HorizontalDivider(color = BorderWarm.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Save to Local Device Gallery", color = Espresso, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            "Complete backup: saves photostrip, animated GIF, and all original poses to device Pictures before cloud upload",
+                            color = Espresso.copy(alpha = 0.7f),
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = saveToLocalGallery,
+                        onCheckedChange = { saveToLocalGallery = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = SageGreen)
+                    )
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .shadow(4.dp, RoundedCornerShape(50), spotColor = Terracotta)
                         .clip(RoundedCornerShape(50))
                         .background(RetroButtonBrush)
+                        .defaultMinSize(minHeight = 48.dp)
                         .clickable(enabled = !isBusy) {
-                            onSave(facing, resolution, mirrorCamera, mirrorResult, bgColor, textColor, showTitle, showDate)
+                            onSave(facing, resolution, mirrorCamera, mirrorResult, bgColor, textColor, showTitle, showDate, saveToLocalGallery)
                         }
                         .padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center
