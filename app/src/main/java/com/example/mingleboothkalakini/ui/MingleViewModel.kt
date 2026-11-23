@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.mingleboothkalakini.data.*
 import com.example.mingleboothkalakini.util.BoothUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -89,6 +91,11 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _adminStatusMessage = MutableStateFlow("")
     val adminStatusMessage: StateFlow<String> = _adminStatusMessage.asStateFlow()
+
+    private val _batchRegenerateState = MutableStateFlow(BatchRegenerateProgress())
+    val batchRegenerateState: StateFlow<BatchRegenerateProgress> = _batchRegenerateState.asStateFlow()
+
+    private var batchRegenerateJob: Job? = null
 
     init {
         refreshBoothSettings()
@@ -500,13 +507,14 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
                         _adminStatusMessage.value = "Updating local gallery backup…"
                         val rawPhotos = updated.photos.mapNotNull { RemoteRepository.downloadBitmap(it.url) }
                         val stripBmp = RemoteRepository.downloadBitmap(updated.stripUrl)
+                        val gifBytes = if (!updated.gifUrl.isNullOrBlank()) RemoteRepository.downloadBytes(updated.gifUrl!!) else null
                         if (stripBmp != null) {
                             BoothUtils.saveSessionToLocalGallery(
                                 context = getApplication(),
                                 sessionId = updated.id,
                                 eventTitle = _settings.value.eventTitle,
                                 stripBitmap = stripBmp,
-                                gifBytes = null,
+                                gifBytes = gifBytes,
                                 originalPhotos = rawPhotos
                             )
                         }
@@ -524,5 +532,127 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
                 _adminStatusMessage.value = ""
             }
         }
+    }
+
+    fun regenerateAllEventSessions(eventId: String, eventTitle: String) {
+        if (_batchRegenerateState.value.isRunning) {
+            showToast("A batch regeneration job is already in progress.")
+            return
+        }
+
+        batchRegenerateJob = viewModelScope.launch(Dispatchers.IO) {
+            _batchRegenerateState.value = BatchRegenerateProgress(
+                isRunning = true,
+                eventId = eventId,
+                eventTitle = eventTitle,
+                currentIndex = 0,
+                totalCount = 0,
+                detailMessage = "Fetching sessions for $eventTitle from cloud database…"
+            )
+
+            try {
+                val targetEventId = if (eventId == "default" || eventId.isBlank()) null else eventId
+                val eventSessions = RemoteRepository.getSessions(targetEventId).let { list ->
+                    if (targetEventId == null) list.filter { it.eventId.isBlank() || it.eventId == "default" } else list
+                }
+
+                if (eventSessions.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        showToast("No photo sessions found for $eventTitle")
+                    }
+                    _batchRegenerateState.value = BatchRegenerateProgress()
+                    return@launch
+                }
+
+                val total = eventSessions.size
+                _batchRegenerateState.value = _batchRegenerateState.value.copy(
+                    totalCount = total,
+                    detailMessage = "Found $total sessions. Starting regeneration…"
+                )
+
+                var succeeded = 0
+                var failed = 0
+                val frameCache = mutableMapOf<String, Bitmap>()
+
+                for (idx in eventSessions.indices) {
+                    if (!isActive) break
+                    val session = eventSessions[idx]
+                    val sessionShortId = session.id.takeLast(6).uppercase()
+
+                    _batchRegenerateState.value = _batchRegenerateState.value.copy(
+                        currentIndex = idx + 1,
+                        currentSessionId = session.id,
+                        detailMessage = "[$sessionShortId ${idx + 1}/$total] Initializing…"
+                    )
+
+                    val updated = RemoteRepository.regenerateSession(
+                        session = session,
+                        settings = _settings.value,
+                        frameCache = frameCache,
+                        onProgress = { step ->
+                            _batchRegenerateState.value = _batchRegenerateState.value.copy(
+                                detailMessage = "[$sessionShortId ${idx + 1}/$total] $step"
+                            )
+                        }
+                    )
+
+                    if (updated != null) {
+                        succeeded++
+                        if (_settings.value.saveToLocalGallery) {
+                            try {
+                                val rawPhotos = updated.photos.mapNotNull { RemoteRepository.downloadBitmap(it.url) }
+                                val stripBmp = RemoteRepository.downloadBitmap(updated.stripUrl)
+                                val gifBytes = if (!updated.gifUrl.isNullOrBlank()) RemoteRepository.downloadBytes(updated.gifUrl!!) else null
+                                if (stripBmp != null) {
+                                    BoothUtils.saveSessionToLocalGallery(
+                                        context = getApplication(),
+                                        sessionId = updated.id,
+                                        eventTitle = _settings.value.eventTitle,
+                                        stripBitmap = stripBmp,
+                                        gifBytes = gifBytes,
+                                        originalPhotos = rawPhotos
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                        _sessions.value = _sessions.value.map { if (it.id == updated.id) updated else it }
+                    } else {
+                        failed++
+                    }
+
+                    _batchRegenerateState.value = _batchRegenerateState.value.copy(
+                        successCount = succeeded,
+                        failureCount = failed
+                    )
+                }
+
+                val finalMessage = if (isActive) {
+                    "Completed: $succeeded succeeded, $failed failed ($total total)"
+                } else {
+                    "Batch regeneration cancelled after $succeeded sessions."
+                }
+
+                withContext(Dispatchers.Main) {
+                    showToast(finalMessage)
+                    loadAdminData()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    showToast("Batch regeneration error: ${e.message}")
+                }
+            } finally {
+                _batchRegenerateState.value = BatchRegenerateProgress()
+            }
+        }
+    }
+
+    fun cancelBatchRegeneration() {
+        batchRegenerateJob?.cancel()
+        batchRegenerateJob = null
+        _batchRegenerateState.value = BatchRegenerateProgress()
+        showToast("Batch regeneration cancelled")
     }
 }

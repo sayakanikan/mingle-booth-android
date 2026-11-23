@@ -116,3 +116,21 @@ data class CameraDeviceOption(
     val isExternal: Boolean = false
 )
 
+data class BatchRegenerateProgress(
+    val isRunning: Boolean = false,
+    val eventId: String = "",
+    val eventTitle: String = "",
+    val currentIndex: Int = 0,
+    val totalCount: Int = 0,
+    val currentSessionId: String = "",
+    val detailMessage: String = "",
+    val successCount: Int = 0,
+    val failureCount: Int = 0
+) {
+    val progressFraction: Float
+        get() = if (totalCount > 0) (currentIndex.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f) else 0f
+
+    val percentage: Int
+        get() = (progressFraction * 100).toInt().coerceIn(0, 100)
+}
+

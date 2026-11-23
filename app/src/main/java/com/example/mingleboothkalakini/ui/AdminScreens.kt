@@ -53,6 +53,7 @@ import com.example.mingleboothkalakini.data.BoothSettings
 import com.example.mingleboothkalakini.data.EventItem
 import com.example.mingleboothkalakini.data.FrameItem
 import com.example.mingleboothkalakini.data.PhotoSessionItem
+import com.example.mingleboothkalakini.data.BatchRegenerateProgress
 import com.example.mingleboothkalakini.util.BoothUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -180,6 +181,9 @@ fun AdminDashboardScreen(
     onSaveCameraAndBranding: (String, String, Boolean, Boolean, String, String, Boolean, Boolean, Boolean) -> Unit,
     onDeleteSession: (PhotoSessionItem) -> Unit,
     onRegenerateSession: (PhotoSessionItem) -> Unit = {},
+    batchProgress: BatchRegenerateProgress = BatchRegenerateProgress(),
+    onRegenerateAllEventPhotos: (String, String) -> Unit = { _, _ -> },
+    onCancelBatchRegeneration: () -> Unit = {},
     adminStatusMessage: String = "",
     onFilterGalleryByEvent: (String?) -> Unit,
     onReturnToBooth: () -> Unit,
@@ -303,7 +307,88 @@ fun AdminDashboardScreen(
             }
         }
 
-        if (isBusy) {
+        // Background Batch Regeneration Progress Banner
+        if (batchProgress.isRunning) {
+            Surface(
+                color = SoftPeach,
+                border = BorderStroke(1.dp, Terracotta.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Terracotta
+                            )
+                            Text(
+                                text = "REGENERATING ALL PHOTOS • ${batchProgress.eventTitle.uppercase()}",
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = Espresso,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "${batchProgress.currentIndex} / ${batchProgress.totalCount} (${batchProgress.percentage}%)",
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = Terracotta
+                            )
+                            OutlinedButton(
+                                onClick = onCancelBatchRegeneration,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.5f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626))
+                            ) {
+                                Text("Cancel", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { batchProgress.progressFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50)),
+                        color = Terracotta,
+                        trackColor = Color.White.copy(alpha = 0.8f)
+                    )
+
+                    Text(
+                        text = batchProgress.detailMessage,
+                        fontSize = 10.sp,
+                        color = MutedCocoa,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        } else if (isBusy) {
             LinearProgressIndicator(
                 color = Terracotta,
                 trackColor = SoftPeach,
@@ -345,6 +430,7 @@ fun AdminDashboardScreen(
                     settings = settings,
                     events = events,
                     isBusy = isBusy,
+                    batchProgress = batchProgress,
                     onCreateEvent = onCreateEvent,
                     onUpdateEvent = onUpdateEvent,
                     onActivateEvent = onActivateEvent,
@@ -355,7 +441,8 @@ fun AdminDashboardScreen(
                     onOpenEventGallery = { evId ->
                         onFilterGalleryByEvent(evId)
                         selectedTab = 2
-                    }
+                    },
+                    onRegenerateAllEventPhotos = onRegenerateAllEventPhotos
                 )
                 1 -> CameraAndBrandingTab(
                     settings = settings,
@@ -367,9 +454,11 @@ fun AdminDashboardScreen(
                     events = events,
                     activeEventId = settings.eventId,
                     isBusy = isBusy,
+                    batchProgress = batchProgress,
                     onFilterByEvent = onFilterGalleryByEvent,
                     onDeleteSession = onDeleteSession,
-                    onRegenerateSession = onRegenerateSession
+                    onRegenerateSession = onRegenerateSession,
+                    onRegenerateAllEventPhotos = onRegenerateAllEventPhotos
                 )
             }
         }
@@ -381,6 +470,7 @@ private fun EventsAndFramesTab(
     settings: BoothSettings,
     events: List<EventItem>,
     isBusy: Boolean,
+    batchProgress: BatchRegenerateProgress = BatchRegenerateProgress(),
     onCreateEvent: (String, String, Boolean) -> Unit,
     onUpdateEvent: (String, String, String, Boolean) -> Unit,
     onActivateEvent: (String) -> Unit,
@@ -388,13 +478,15 @@ private fun EventsAndFramesTab(
     onActivateFrame: (String) -> Unit,
     onAddTemplateFrame: (String) -> Unit,
     onDeleteFrame: (String) -> Unit,
-    onOpenEventGallery: (String) -> Unit
+    onOpenEventGallery: (String) -> Unit,
+    onRegenerateAllEventPhotos: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
     var eventToEdit by remember { mutableStateOf<EventItem?>(null) }
     var eventForQrDialog by remember { mutableStateOf<EventItem?>(null) }
     var eventQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var eventToRegenerateAll by remember { mutableStateOf<EventItem?>(null) }
 
     LaunchedEffect(eventForQrDialog) {
         val ev = eventForQrDialog
@@ -570,6 +662,17 @@ private fun EventsAndFramesTab(
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                                 ) {
                                     Text("Photos", fontSize = 11.sp)
+                                }
+
+                                IconButton(
+                                    onClick = { eventToRegenerateAll = ev },
+                                    enabled = !isBusy && !batchProgress.isRunning
+                                ) {
+                                    Icon(
+                                        Icons.Default.Sync,
+                                        contentDescription = "Regenerate All Photos in Event",
+                                        tint = if (batchProgress.isRunning && batchProgress.eventId == ev.id) Terracotta else Espresso
+                                    )
                                 }
 
                                 if (ev.id != "default") {
@@ -920,6 +1023,88 @@ private fun EventsAndFramesTab(
                             shape = RoundedCornerShape(50)
                         ) {
                             Text("Close", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (eventToRegenerateAll != null) {
+        val ev = eventToRegenerateAll!!
+        Dialog(onDismissRequest = { if (!batchProgress.isRunning) eventToRegenerateAll = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Terracotta,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Regenerate Event Photos",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "[ ${ev.title.uppercase()} ]",
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips and re-encode high-res Full HD animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
+                        color = Espresso,
+                        fontFamily = FontFamily.SansSerif,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { eventToRegenerateAll = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BorderWarm)
+                        ) {
+                            Text("Cancel", color = Espresso)
+                        }
+
+                        Button(
+                            onClick = {
+                                val target = eventToRegenerateAll
+                                eventToRegenerateAll = null
+                                if (target != null) {
+                                    onRegenerateAllEventPhotos(target.id, target.title)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White)
+                        ) {
+                            Text("Start", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1744,9 +1929,11 @@ private fun GalleryTab(
     events: List<EventItem>,
     activeEventId: String?,
     isBusy: Boolean = false,
+    batchProgress: BatchRegenerateProgress = BatchRegenerateProgress(),
     onFilterByEvent: (String?) -> Unit,
     onDeleteSession: (PhotoSessionItem) -> Unit,
-    onRegenerateSession: (PhotoSessionItem) -> Unit = {}
+    onRegenerateSession: (PhotoSessionItem) -> Unit = {},
+    onRegenerateAllEventPhotos: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     var selectedFilterId by remember(activeEventId) { mutableStateOf(activeEventId) }
@@ -1755,6 +1942,7 @@ private fun GalleryTab(
     var sessionToRegenerate by remember { mutableStateOf<PhotoSessionItem?>(null) }
     var eventQrDialogForGallery by remember { mutableStateOf<EventItem?>(null) }
     var eventQrBitmapForGallery by remember { mutableStateOf<Bitmap?>(null) }
+    var eventToRegenerateAllInGallery by remember { mutableStateOf<EventItem?>(null) }
 
     LaunchedEffect(qrDialogSession) {
         val s = qrDialogSession
@@ -1879,6 +2067,16 @@ private fun GalleryTab(
                             }
                         ) {
                             Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
+                        }
+                        IconButton(
+                            onClick = { eventToRegenerateAllInGallery = currentEvent },
+                            enabled = !isBusy && !batchProgress.isRunning
+                        ) {
+                            Icon(
+                                Icons.Default.Sync,
+                                contentDescription = "Regenerate All Event Photos",
+                                tint = if (batchProgress.isRunning && batchProgress.eventId == currentEvent.id) Terracotta else Espresso
+                            )
                         }
                     }
                 }
@@ -2240,6 +2438,88 @@ private fun GalleryTab(
                             shape = RoundedCornerShape(50)
                         ) {
                             Text("Close", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (eventToRegenerateAllInGallery != null) {
+        val ev = eventToRegenerateAllInGallery!!
+        Dialog(onDismissRequest = { if (!batchProgress.isRunning) eventToRegenerateAllInGallery = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Terracotta,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Regenerate Event Photos",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "[ ${ev.title.uppercase()} ]",
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips and re-encode high-res Full HD animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
+                        color = Espresso,
+                        fontFamily = FontFamily.SansSerif,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { eventToRegenerateAllInGallery = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BorderWarm)
+                        ) {
+                            Text("Cancel", color = Espresso)
+                        }
+
+                        Button(
+                            onClick = {
+                                val target = eventToRegenerateAllInGallery
+                                eventToRegenerateAllInGallery = null
+                                if (target != null) {
+                                    onRegenerateAllEventPhotos(target.id, target.title)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White)
+                        ) {
+                            Text("Start", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

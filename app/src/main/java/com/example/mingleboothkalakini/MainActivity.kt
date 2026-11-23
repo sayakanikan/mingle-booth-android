@@ -192,6 +192,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
     val sessions by viewModel.sessions.collectAsState()
     val adminBusy by viewModel.adminBusy.collectAsState()
     val adminStatusMessage by viewModel.adminStatusMessage.collectAsState()
+    val batchProgress by viewModel.batchRegenerateState.collectAsState()
     val lastModifiedSlot by viewModel.lastModifiedSlot.collectAsState()
     val photosRevision by viewModel.photosRevision.collectAsState()
 
@@ -273,6 +274,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             sessions = sessions,
             isBusy = adminBusy,
             adminStatusMessage = adminStatusMessage,
+            batchProgress = batchProgress,
             onCreateEvent = { t, s, a -> viewModel.createNewEvent(t, s, a) },
             onUpdateEvent = { id, t, s, a -> viewModel.updateExistingEvent(id, t, s, a) },
             onActivateEvent = { id -> viewModel.setActiveEvent(id) },
@@ -285,6 +287,8 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             },
             onDeleteSession = { sess -> viewModel.deleteSessionItem(sess) },
             onRegenerateSession = { sess -> viewModel.regenerateSessionItem(sess) },
+            onRegenerateAllEventPhotos = { id, title -> viewModel.regenerateAllEventSessions(id, title) },
+            onCancelBatchRegeneration = { viewModel.cancelBatchRegeneration() },
             onFilterGalleryByEvent = { evId -> viewModel.loadAdminData(evId) },
             onReturnToBooth = { viewModel.returnToScreensaver() },
             onLogout = { viewModel.logoutAdmin() }

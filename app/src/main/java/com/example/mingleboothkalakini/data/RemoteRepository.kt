@@ -488,6 +488,7 @@ object RemoteRepository {
     suspend fun regenerateSession(
         session: PhotoSessionItem,
         settings: BoothSettings,
+        frameCache: MutableMap<String, Bitmap>? = null,
         onProgress: (String) -> Unit
     ): PhotoSessionItem? = withContext(Dispatchers.IO) {
         try {
@@ -534,8 +535,17 @@ object RemoteRepository {
             val effectiveSettings = settings.copy(activeFrame = matchedFrame)
 
             val frameBitmap = if (!matchedFrame?.dataUrl.isNullOrBlank()) {
-                onProgress("Loading frame overlay…")
-                downloadBitmap(matchedFrame!!.dataUrl)
+                val frameUrl = matchedFrame!!.dataUrl
+                if (frameCache != null && frameCache.containsKey(frameUrl)) {
+                    frameCache[frameUrl]
+                } else {
+                    onProgress("Loading frame overlay…")
+                    val downloaded = downloadBitmap(frameUrl)
+                    if (downloaded != null && frameCache != null) {
+                        frameCache[frameUrl] = downloaded
+                    }
+                    downloaded
+                }
             } else null
 
             // Re-composite strip
@@ -628,6 +638,23 @@ object RemoteRepository {
                 if (!resp.isSuccessful) return@withContext null
                 val bytes = resp.body?.bytes() ?: return@withContext null
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    suspend fun downloadBytes(urlOrDataUrl: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            if (urlOrDataUrl.startsWith("data:")) {
+                val base64Part = urlOrDataUrl.substringAfter(",")
+                return@withContext Base64.decode(base64Part, Base64.DEFAULT)
+            }
+            val req = Request.Builder().url(urlOrDataUrl).build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                resp.body?.bytes()
             }
         } catch (e: Exception) {
             e.printStackTrace()
