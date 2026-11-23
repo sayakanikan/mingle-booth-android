@@ -205,10 +205,15 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
                     cachedFrameBitmap = _cachedFrameBitmap.value
                 )
 
-                // 2. Build Animated GIF
+                // 2. Build Animated GIF in Full HD / camera resolution
                 _processingStage.value = 1
-                _processingDetail.value = "Encoding animated GIF…"
-                val gifBytes = BoothUtils.buildAnimatedGif(photos)
+                _processingDetail.value = "Encoding animated GIF (1080p)…"
+                val (resW, resH) = currentSettings.cameraResolution.split("x").let {
+                    val w = it.getOrNull(0)?.toIntOrNull() ?: 1920
+                    val h = it.getOrNull(1)?.toIntOrNull() ?: 1080
+                    w to h
+                }
+                val gifBytes = BoothUtils.buildAnimatedGif(photos, width = resW, height = resH)
 
                 // 2.5 Save Complete Backup to Local Gallery (before cloud upload)
                 if (currentSettings.saveToLocalGallery) {

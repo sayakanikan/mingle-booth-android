@@ -555,18 +555,28 @@ object BoothUtils {
         if (photos.isEmpty()) return@withContext null
         try {
             val first = photos.first()
+            val isLandscape = first.width >= first.height
             val (targetW, targetH) = if (width > 0 && height > 0) {
-                width to height
-            } else {
-                val maxDim = 720
-                if (first.width >= first.height) {
-                    val w = maxDim
-                    val h = ((maxDim.toFloat() * first.height) / first.width).roundToInt()
-                    (w and 1.inv()) to (h and 1.inv())
+                // Respect explicit target dimensions (e.g. 1920x1080), adapting to photo orientation
+                val w = if (isLandscape) maxOf(width, height) else minOf(width, height)
+                val h = if (isLandscape) minOf(width, height) else maxOf(width, height)
+                val maxAllowed = 1920
+                if (w > maxAllowed || h > maxAllowed) {
+                    val scale = maxAllowed.toFloat() / maxOf(w, h)
+                    ((w * scale).roundToInt() and 1.inv()) to ((h * scale).roundToInt() and 1.inv())
                 } else {
-                    val h = maxDim
-                    val w = ((maxDim.toFloat() * first.width) / first.height).roundToInt()
                     (w and 1.inv()) to (h and 1.inv())
+                }
+            } else {
+                // If original photo is already <= 1920x1080 (e.g. 1920x1080, 1280x720, 1080x1920),
+                // follow original file dimensions directly!
+                if (isLandscape && first.width <= 1920 && first.height <= 1080) {
+                    (first.width and 1.inv()) to (first.height and 1.inv())
+                } else if (!isLandscape && first.height <= 1920 && first.width <= 1080) {
+                    (first.width and 1.inv()) to (first.height and 1.inv())
+                } else {
+                    // Standardize high-res camera captures (e.g. 24MP Sony a6400 raw captures) to Full HD 1920x1080
+                    if (isLandscape) 1920 to 1080 else 1080 to 1920
                 }
             }
             val scaledFrames = photos.map { photo ->
@@ -580,6 +590,7 @@ object BoothUtils {
     }
 
     private fun centerCropBitmap(src: Bitmap, targetW: Int, targetH: Int): Bitmap {
+        if (src.width == targetW && src.height == targetH) return src
         val out = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
         val pAspect = src.width.toFloat() / src.height.toFloat()
@@ -1004,21 +1015,21 @@ object SimpleGifEncoder {
         val h = frames.first().height
         val out = ByteArrayOutputStream()
 
-        // 1. Build an adaptive 256-color palette from sampled frame pixels
-        val palette = generatePalette(frames, 256)
-        val lut = buildLookupTable(palette)
+        // 1. Generate dedicated 256-color palettes for each individual frame (Local Color Tables)
+        val palettes = frames.map { generatePalette(it, 256) }
 
         // 2. GIF Header
         out.write("GIF89a".toByteArray(Charsets.US_ASCII))
         writeShort(out, w)
         writeShort(out, h)
-        out.write(0xF7) // Global color table flag (1), color res (7), sort (0), size of GCT (7 -> 256 colors)
+        out.write(0xF7) // Global color table present (256 colors)
         out.write(0)    // Background color
         out.write(0)    // Pixel aspect ratio
 
-        // 3. Global Color Table (256 * 3 bytes)
+        // 3. Global Color Table (use frame 0 palette as fallback)
+        val gct = palettes.first()
         for (i in 0 until 256) {
-            val c = palette[i]
+            val c = gct[i]
             out.write((c shr 16) and 0xFF)
             out.write((c shr 8) and 0xFF)
             out.write(c and 0xFF)
@@ -1034,11 +1045,12 @@ object SimpleGifEncoder {
         writeShort(out, 0) // Loop forever
         out.write(0)
 
-        // Pause on the final pose for 2x delay before looping
-        val allFrames = frames + frames.last()
-        for (idx in allFrames.indices) {
-            val frame = allFrames[idx]
-            val frameDelayCs = if (idx == allFrames.lastIndex) (delayMs * 2) / 10 else delayMs / 10
+        // 5. Encode each frame with its own dedicated 256-color Local Color Table
+        for (idx in frames.indices) {
+            val frame = frames[idx]
+            val palette = palettes[idx]
+            // Pause on the final pose for 2x delay before looping
+            val frameDelayCs = if (idx == frames.lastIndex) (delayMs * 2) / 10 else delayMs / 10
 
             // Graphic Control Extension
             out.write(0x21)
@@ -1049,16 +1061,24 @@ object SimpleGifEncoder {
             out.write(0)
             out.write(0)
 
-            // Image Descriptor
+            // Image Descriptor with Local Color Table (0x87: LCT flag=1, size=256)
             out.write(0x2C)
             writeShort(out, 0)
             writeShort(out, 0)
             writeShort(out, w)
             writeShort(out, h)
-            out.write(0) // No local color table, not interlaced
+            out.write(0x87) // Local color table follows immediately
 
-            // Quantize pixels using RGB565 LUT and serpentine clamped Floyd-Steinberg dithering
-            val indexed = quantizeWithDithering(frame, palette, lut)
+            // Local Color Table (256 * 3 bytes)
+            for (i in 0 until 256) {
+                val c = palette[i]
+                out.write((c shr 16) and 0xFF)
+                out.write((c shr 8) and 0xFF)
+                out.write(c and 0xFF)
+            }
+
+            // Quantize pixels using exact 24-bit perceptual distance and direct hash cache (no noisy dither speckles)
+            val indexed = quantizeFrame(frame, palette)
             lzwEncode(out, indexed)
         }
 
@@ -1087,12 +1107,16 @@ object SimpleGifEncoder {
         }
 
         val count: Int get() = end - start
-        val rRange: Int get() = ((maxR - minR) * 299) / 1000
-        val gRange: Int get() = ((maxG - minG) * 587) / 1000
-        val bRange: Int get() = ((maxB - minB) * 114) / 1000
-        val volume: Int get() = maxOf(rRange, gRange, bRange)
+        val rSpanWeighted: Int get() = ((maxR - minR) * 299) / 1000
+        val gSpanWeighted: Int get() = ((maxG - minG) * 587) / 1000
+        val bSpanWeighted: Int get() = ((maxB - minB) * 114) / 1000
+        val weightedSpan: Int get() = maxOf(rSpanWeighted, gSpanWeighted, bSpanWeighted)
 
-        override fun compareTo(other: ColorBox): Int = other.volume.compareTo(this.volume)
+        // Population-weighted variance priority:
+        // Multiplying count by span squared ensures dense areas like skin tones get dedicated colors!
+        val priority: Long get() = count.toLong() * (weightedSpan.toLong() * weightedSpan + 1)
+
+        override fun compareTo(other: ColorBox): Int = other.priority.compareTo(this.priority)
 
         fun averageColor(): Int {
             if (count == 0) return 0
@@ -1112,22 +1136,21 @@ object SimpleGifEncoder {
         }
     }
 
-    private fun generatePalette(frames: List<Bitmap>, maxColors: Int = 256): IntArray {
-        val totalPixels = frames.sumOf { it.width * it.height }
-        val targetSamples = 40000
-        val step = maxOf(1, totalPixels / targetSamples)
-        val samples = ArrayList<Int>(minOf(totalPixels, targetSamples + 5000))
+    private fun generatePalette(frame: Bitmap, maxColors: Int = 256): IntArray {
+        val w = frame.width
+        val h = frame.height
+        // Fast color sampling using a thumbnail to minimize heap allocation and maximize speed
+        val thumbW = 240
+        val thumbH = ((240f * h) / w).roundToInt().coerceAtLeast(1)
+        val thumb = Bitmap.createScaledBitmap(frame, thumbW, thumbH, false)
+        val totalPixels = thumbW * thumbH
+        val pixels = IntArray(totalPixels)
+        thumb.getPixels(pixels, 0, thumbW, 0, 0, thumbW, thumbH)
+        thumb.recycle()
 
-        for (frame in frames) {
-            val w = frame.width
-            val h = frame.height
-            val pixels = IntArray(w * h)
-            frame.getPixels(pixels, 0, w, 0, 0, w, h)
-            var p = 0
-            while (p < pixels.size) {
-                samples.add(pixels[p] and 0x00FFFFFF)
-                p += step
-            }
+        val samples = ArrayList<Int>(totalPixels)
+        for (i in 0 until totalPixels) {
+            samples.add(pixels[i] and 0x00FFFFFF)
         }
 
         if (samples.isEmpty()) {
@@ -1140,14 +1163,14 @@ object SimpleGifEncoder {
 
         while (queue.size < maxColors) {
             val box = queue.poll() ?: break
-            if (box.count <= 1 || box.volume == 0) {
+            if (box.count <= 1 || box.weightedSpan == 0) {
                 queue.add(box)
                 break
             }
 
             val channel = when {
-                box.gRange >= box.rRange && box.gRange >= box.bRange -> 1
-                box.rRange >= box.bRange -> 0
+                box.gSpanWeighted >= box.rSpanWeighted && box.gSpanWeighted >= box.bSpanWeighted -> 1
+                box.rSpanWeighted >= box.bSpanWeighted -> 0
                 else -> 2
             }
 
@@ -1192,165 +1215,56 @@ object SimpleGifEncoder {
 
     private fun getChannel(c: Int, channel: Int): Int {
         return when (channel) {
-            0 -> (c shr 16) and 0xFF // Red
-            1 -> (c shr 8) and 0xFF  // Green
-            else -> c and 0xFF       // Blue
+            0 -> (c shr 16) and 0xFF
+            1 -> (c shr 8) and 0xFF
+            else -> c and 0xFF
         }
     }
 
-    private fun buildLookupTable(palette: IntArray): ByteArray {
-        val lut = ByteArray(65536)
+    private fun quantizeFrame(frame: Bitmap, palette: IntArray): ByteArray {
+        val w = frame.width
+        val h = frame.height
+        val total = w * h
+        val argb = IntArray(total)
+        frame.getPixels(argb, 0, w, 0, 0, w, h)
+        val indexed = ByteArray(total)
+
         val palR = IntArray(256) { (palette[it] shr 16) and 0xFF }
         val palG = IntArray(256) { (palette[it] shr 8) and 0xFF }
         val palB = IntArray(256) { palette[it] and 0xFF }
 
-        for (r5 in 0 until 32) {
-            val r = (r5 * 255 + 15) / 31
-            for (g6 in 0 until 64) {
-                val g = (g6 * 255 + 31) / 63
-                for (b5 in 0 until 32) {
-                    val b = (b5 * 255 + 15) / 31
-                    var bestIdx = 0
-                    var bestDist = Long.MAX_VALUE
-                    for (i in 0 until 256) {
-                        val dr = r - palR[i]
-                        val dg = g - palG[i]
-                        val db = b - palB[i]
-                        val dist = (2L * dr * dr) + (4L * dg * dg) + (3L * db * db)
-                        if (dist < bestDist) {
-                            bestDist = dist
-                            bestIdx = i
-                        }
-                    }
-                    val lutIndex = (r5 shl 11) or (g6 shl 5) or b5
-                    lut[lutIndex] = bestIdx.toByte()
-                }
-            }
-        }
-        return lut
-    }
+        val cacheKeys = IntArray(16384) { -1 }
+        val cacheValues = ByteArray(16384)
 
-    private fun quantizeWithDithering(
-        frame: Bitmap,
-        palette: IntArray,
-        lut: ByteArray
-    ): ByteArray {
-        val w = frame.width
-        val h = frame.height
-        val argb = IntArray(w * h)
-        frame.getPixels(argb, 0, w, 0, 0, w, h)
-        val indexed = ByteArray(w * h)
-
-        var currErrR = IntArray(w + 2)
-        var currErrG = IntArray(w + 2)
-        var currErrB = IntArray(w + 2)
-        var nextErrR = IntArray(w + 2)
-        var nextErrG = IntArray(w + 2)
-        var nextErrB = IntArray(w + 2)
-
-        for (y in 0 until h) {
-            nextErrR.fill(0)
-            nextErrG.fill(0)
-            nextErrB.fill(0)
-
-            if (y % 2 == 0) {
-                // Left-to-right scan
-                for (x in 0 until w) {
-                    val c = argb[y * w + x]
-                    val origR = (c shr 16) and 0xFF
-                    val origG = (c shr 8) and 0xFF
-                    val origB = c and 0xFF
-
-                    val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
-                    val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
-                    val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
-
-                    val r5 = (r * 31 + 127) / 255
-                    val g6 = (g * 63 + 127) / 255
-                    val b5 = (b * 31 + 127) / 255
-                    val lutIdx = (r5 shl 11) or (g6 shl 5) or b5
-                    val colorIdx = lut[lutIdx].toInt() and 0xFF
-
-                    indexed[y * w + x] = colorIdx.toByte()
-
-                    val palCol = palette[colorIdx]
-                    val rawErrR = r - ((palCol shr 16) and 0xFF)
-                    val rawErrG = g - ((palCol shr 8) and 0xFF)
-                    val rawErrB = b - (palCol and 0xFF)
-
-                    // Error attenuation & clamp to eliminate noisy speckles / bad pixels
-                    val errR = ((rawErrR * 4) / 5).coerceIn(-18, 18)
-                    val errG = ((rawErrG * 4) / 5).coerceIn(-18, 18)
-                    val errB = ((rawErrB * 4) / 5).coerceIn(-18, 18)
-
-                    currErrR[x + 2] += (errR * 7) shr 4
-                    currErrG[x + 2] += (errG * 7) shr 4
-                    currErrB[x + 2] += (errB * 7) shr 4
-
-                    nextErrR[x] += (errR * 3) shr 4
-                    nextErrG[x] += (errG * 3) shr 4
-                    nextErrB[x] += (errB * 3) shr 4
-
-                    nextErrR[x + 1] += (errR * 5) shr 4
-                    nextErrG[x + 1] += (errG * 5) shr 4
-                    nextErrB[x + 1] += (errB * 5) shr 4
-
-                    nextErrR[x + 2] += (errR * 1) shr 4
-                    nextErrG[x + 2] += (errG * 1) shr 4
-                    nextErrB[x + 2] += (errB * 1) shr 4
-                }
+        for (i in 0 until total) {
+            val c = argb[i] and 0x00FFFFFF
+            val hash = (c xor (c ushr 10) xor (c ushr 18)) and 16383
+            if (cacheKeys[hash] == c) {
+                indexed[i] = cacheValues[hash]
             } else {
-                // Right-to-left scan
-                for (x in w - 1 downTo 0) {
-                    val c = argb[y * w + x]
-                    val origR = (c shr 16) and 0xFF
-                    val origG = (c shr 8) and 0xFF
-                    val origB = c and 0xFF
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
 
-                    val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
-                    val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
-                    val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
-
-                    val r5 = (r * 31 + 127) / 255
-                    val g6 = (g * 63 + 127) / 255
-                    val b5 = (b * 31 + 127) / 255
-                    val lutIdx = (r5 shl 11) or (g6 shl 5) or b5
-                    val colorIdx = lut[lutIdx].toInt() and 0xFF
-
-                    indexed[y * w + x] = colorIdx.toByte()
-
-                    val palCol = palette[colorIdx]
-                    val rawErrR = r - ((palCol shr 16) and 0xFF)
-                    val rawErrG = g - ((palCol shr 8) and 0xFF)
-                    val rawErrB = b - (palCol and 0xFF)
-
-                    val errR = ((rawErrR * 4) / 5).coerceIn(-18, 18)
-                    val errG = ((rawErrG * 4) / 5).coerceIn(-18, 18)
-                    val errB = ((rawErrB * 4) / 5).coerceIn(-18, 18)
-
-                    currErrR[x] += (errR * 7) shr 4
-                    currErrG[x] += (errG * 7) shr 4
-                    currErrB[x] += (errB * 7) shr 4
-
-                    nextErrR[x + 2] += (errR * 3) shr 4
-                    nextErrG[x + 2] += (errG * 3) shr 4
-                    nextErrB[x + 2] += (errB * 3) shr 4
-
-                    nextErrR[x + 1] += (errR * 5) shr 4
-                    nextErrG[x + 1] += (errG * 5) shr 4
-                    nextErrB[x + 1] += (errB * 5) shr 4
-
-                    nextErrR[x] += (errR * 1) shr 4
-                    nextErrG[x] += (errG * 1) shr 4
-                    nextErrB[x] += (errB * 1) shr 4
+                var bestIdx = 0
+                var bestDist = Int.MAX_VALUE
+                for (p in 0 until 256) {
+                    val dr = r - palR[p]
+                    val dg = g - palG[p]
+                    val db = b - palB[p]
+                    val dist = (2 * dr * dr) + (4 * dg * dg) + (3 * db * db)
+                    if (dist < bestDist) {
+                        bestDist = dist
+                        bestIdx = p
+                        if (dist == 0) break
+                    }
                 }
+                val bestByte = bestIdx.toByte()
+                cacheKeys[hash] = c
+                cacheValues[hash] = bestByte
+                indexed[i] = bestByte
             }
-
-            val tmpR = currErrR; currErrR = nextErrR; nextErrR = tmpR
-            val tmpG = currErrG; currErrG = nextErrG; nextErrG = tmpG
-            val tmpB = currErrB; currErrB = nextErrB; nextErrB = tmpB
         }
-
         return indexed
     }
 
