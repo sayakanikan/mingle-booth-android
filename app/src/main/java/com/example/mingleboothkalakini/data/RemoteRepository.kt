@@ -281,6 +281,45 @@ object RemoteRepository {
         }
     }
 
+    suspend fun clearActiveFrame(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            patchJson("frames?is_active=eq.true", JSONObject().put("is_active", false))
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    suspend fun updateFrameSlots(
+        frameId: String,
+        slots: List<Slot>,
+        width: Int? = null,
+        height: Int? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val slotsJson = JSONArray()
+            slots.sortedBy { it.slotIndex }.forEachIndexed { idx, s ->
+                slotsJson.put(
+                    JSONObject()
+                        .put("slot_index", idx)
+                        .put("x", s.x)
+                        .put("y", s.y)
+                        .put("w", s.w)
+                        .put("h", s.h)
+                )
+            }
+            val payload = JSONObject().put("slots", slotsJson)
+            if (width != null) payload.put("width", width)
+            if (height != null) payload.put("height", height)
+            patchJson("frames?id=eq.$frameId", payload)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     suspend fun updateCameraAndBrandingSettings(
         eventId: String,
         cameraFacing: String,

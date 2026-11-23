@@ -440,6 +440,66 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun clearActiveFrame() {
+        viewModelScope.launch {
+            _adminBusy.value = true
+            val ok = RemoteRepository.clearActiveFrame()
+            if (ok) {
+                showToast("Active frame cleared")
+                loadAdminData()
+            } else {
+                _adminBusy.value = false
+                showToast("Failed to clear active frame")
+            }
+        }
+    }
+
+    fun uploadCustomFrame(
+        name: String,
+        frameBitmap: Bitmap,
+        slots: List<Slot>
+    ) {
+        viewModelScope.launch {
+            _adminBusy.value = true
+            _adminStatusMessage.value = "Uploading custom frame & slots…"
+            val ok = RemoteRepository.addFrame(
+                name = name,
+                frameBitmap = frameBitmap,
+                slots = slots,
+                eventId = _settings.value.eventId ?: "default"
+            )
+            _adminStatusMessage.value = ""
+            if (ok) {
+                showToast("Frame \"$name\" saved & activated!")
+                loadAdminData()
+            } else {
+                _adminBusy.value = false
+                showToast("Failed to upload custom frame")
+            }
+        }
+    }
+
+    fun updateFrameSlots(
+        frameId: String,
+        slots: List<Slot>,
+        width: Int,
+        height: Int
+    ) {
+        viewModelScope.launch {
+            _adminBusy.value = true
+            _adminStatusMessage.value = "Saving frame slot placement…"
+            val ok = RemoteRepository.updateFrameSlots(frameId, slots, width, height)
+            _adminStatusMessage.value = ""
+            if (ok) {
+                showToast("Slots updated successfully!")
+                loadAdminData()
+            } else {
+                _adminBusy.value = false
+                showToast("Failed to update frame slots")
+            }
+        }
+    }
+
     fun saveCameraAndBranding(
         cameraFacing: String,
         cameraResolution: String,

@@ -281,6 +281,9 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             onDeleteEvent = { id -> viewModel.removeEvent(id) },
             onActivateFrame = { id -> viewModel.setActiveFrame(id) },
             onAddTemplateFrame = { type -> viewModel.addBuiltInFrameTemplate(type) },
+            onUploadCustomFrame = { name, bmp, slots -> viewModel.uploadCustomFrame(name, bmp, slots) },
+            onUpdateFrameSlots = { id, slots, w, h -> viewModel.updateFrameSlots(id, slots, w, h) },
+            onClearActiveFrame = { viewModel.clearActiveFrame() },
             onDeleteFrame = { id -> viewModel.deleteFrameItem(id) },
             onSaveCameraAndBranding = { facing, res, mirCam, mirRes, bg, txt, showT, showD, saveLocal ->
                 viewModel.saveCameraAndBranding(facing, res, mirCam, mirRes, bg, txt, showT, showD, saveLocal)

@@ -431,6 +431,144 @@ object BoothUtils {
         Slot(2, 100, 2080, 1000, 860)
     )
 
+    /**
+     * Decodes a PNG/image Uri at its original native pixel dimensions without Android density scaling.
+     */
+    fun decodeBitmapFromUri(context: Context, uri: android.net.Uri): Bitmap? {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val opts = BitmapFactory.Options().apply {
+                    inScaled = false
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                BitmapFactory.decodeStream(stream, null, opts)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Automatically detects transparent photo placement cutout regions in a PNG frame overlay.
+     * Uses 4-connected BFS flood-fill on pixels with alpha < 10, filters noise (< 40px) and
+     * full-canvas background cutouts, and sorts slots top-to-bottom then left-to-right.
+     */
+    fun detectSlots(bitmap: Bitmap): List<Slot> {
+        val alphaThreshold = 10
+        val minSlotPx = 40
+        val maxDim = 1000
+
+        val origW = bitmap.width
+        val origH = bitmap.height
+        if (origW <= 0 || origH <= 0) return emptyList()
+
+        val scale = min(1f, maxDim.toFloat() / max(origW, origH).toFloat())
+        val w = (origW * scale).roundToInt().coerceAtLeast(1)
+        val h = (origH * scale).roundToInt().coerceAtLeast(1)
+
+        val workBmp = if (w != origW || h != origH) {
+            Bitmap.createScaledBitmap(bitmap, w, h, true)
+        } else {
+            bitmap
+        }
+
+        val pixels = IntArray(w * h)
+        workBmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        if (workBmp !== bitmap) {
+            workBmp.recycle()
+        }
+
+        val transp = BooleanArray(w * h) { i ->
+            ((pixels[i] ushr 24) and 0xFF) < alphaThreshold
+        }
+        val visited = BooleanArray(w * h)
+        val queue = IntArray(w * h)
+
+        val detected = mutableListOf<Slot>()
+        val minScaledPx = max(12, (minSlotPx * scale).roundToInt())
+
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val startIdx = y * w + x
+                if (!transp[startIdx] || visited[startIdx]) continue
+
+                var head = 0
+                var tail = 0
+                queue[tail++] = startIdx
+                visited[startIdx] = true
+
+                var minX = x
+                var maxX = x
+                var minY = y
+                var maxY = y
+
+                while (head < tail) {
+                    val curr = queue[head++]
+                    val cy = curr / w
+                    val cx = curr % w
+
+                    if (cx < minX) minX = cx
+                    if (cx > maxX) maxX = cx
+                    if (cy < minY) minY = cy
+                    if (cy > maxY) maxY = cy
+
+                    if (cx > 0) {
+                        val n = curr - 1
+                        if (!visited[n] && transp[n]) {
+                            visited[n] = true
+                            queue[tail++] = n
+                        }
+                    }
+                    if (cx < w - 1) {
+                        val n = curr + 1
+                        if (!visited[n] && transp[n]) {
+                            visited[n] = true
+                            queue[tail++] = n
+                        }
+                    }
+                    if (cy > 0) {
+                        val n = curr - w
+                        if (!visited[n] && transp[n]) {
+                            visited[n] = true
+                            queue[tail++] = n
+                        }
+                    }
+                    if (cy < h - 1) {
+                        val n = curr + w
+                        if (!visited[n] && transp[n]) {
+                            visited[n] = true
+                            queue[tail++] = n
+                        }
+                    }
+                }
+
+                val slotW = maxX - minX + 1
+                val slotH = maxY - minY + 1
+
+                if (slotW < minScaledPx || slotH < minScaledPx) continue
+                if (slotW >= w * 0.96f && slotH >= h * 0.96f) continue
+
+                val nativeX = (minX / scale).roundToInt()
+                val nativeY = (minY / scale).roundToInt()
+                val nativeW = min(origW - nativeX, (slotW / scale).roundToInt())
+                val nativeH = min(origH - nativeY, (slotH / scale).roundToInt())
+
+                if (nativeW >= minSlotPx && nativeH >= minSlotPx) {
+                    detected.add(Slot(0, nativeX, nativeY, nativeW, nativeH))
+                }
+            }
+        }
+
+        val rowDiffThreshold = (minSlotPx * 0.5f).roundToInt()
+        detected.sortWith { a, b ->
+            val rowDiff = a.y - b.y
+            if (kotlin.math.abs(rowDiff) > rowDiffThreshold) rowDiff else a.x - b.x
+        }
+
+        return detected.mapIndexed { index, slot -> slot.copy(slotIndex = index) }
+    }
+
     fun generateDefaultFrameTemplate(
         type: String,
         title: String

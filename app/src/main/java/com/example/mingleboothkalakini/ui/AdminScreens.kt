@@ -6,7 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -54,9 +57,13 @@ import com.example.mingleboothkalakini.data.EventItem
 import com.example.mingleboothkalakini.data.FrameItem
 import com.example.mingleboothkalakini.data.PhotoSessionItem
 import com.example.mingleboothkalakini.data.BatchRegenerateProgress
+import com.example.mingleboothkalakini.data.RemoteRepository
+import com.example.mingleboothkalakini.data.Slot
 import com.example.mingleboothkalakini.util.BoothUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AdminLoginScreen(
@@ -177,6 +184,9 @@ fun AdminDashboardScreen(
     onDeleteEvent: (String) -> Unit,
     onActivateFrame: (String) -> Unit,
     onAddTemplateFrame: (String) -> Unit,
+    onUploadCustomFrame: (String, Bitmap, List<Slot>) -> Unit = { _, _, _ -> },
+    onUpdateFrameSlots: (String, List<Slot>, Int, Int) -> Unit = { _, _, _, _ -> },
+    onClearActiveFrame: () -> Unit = {},
     onDeleteFrame: (String) -> Unit,
     onSaveCameraAndBranding: (String, String, Boolean, Boolean, String, String, Boolean, Boolean, Boolean) -> Unit,
     onDeleteSession: (PhotoSessionItem) -> Unit,
@@ -437,6 +447,9 @@ fun AdminDashboardScreen(
                     onDeleteEvent = onDeleteEvent,
                     onActivateFrame = onActivateFrame,
                     onAddTemplateFrame = onAddTemplateFrame,
+                    onUploadCustomFrame = onUploadCustomFrame,
+                    onUpdateFrameSlots = onUpdateFrameSlots,
+                    onClearActiveFrame = onClearActiveFrame,
                     onDeleteFrame = onDeleteFrame,
                     onOpenEventGallery = { evId ->
                         onFilterGalleryByEvent(evId)
@@ -465,6 +478,19 @@ fun AdminDashboardScreen(
     }
 }
 
+private data class PendingFrameUpload(
+    val fileName: String,
+    val bitmap: Bitmap,
+    val format: String
+)
+
+private data class EditingFrameTarget(
+    val existingFrameId: String?,
+    val name: String,
+    val bitmap: Bitmap,
+    val initialSlots: List<Slot>
+)
+
 @Composable
 private fun EventsAndFramesTab(
     settings: BoothSettings,
@@ -477,16 +503,58 @@ private fun EventsAndFramesTab(
     onDeleteEvent: (String) -> Unit,
     onActivateFrame: (String) -> Unit,
     onAddTemplateFrame: (String) -> Unit,
+    onUploadCustomFrame: (String, Bitmap, List<Slot>) -> Unit = { _, _, _ -> },
+    onUpdateFrameSlots: (String, List<Slot>, Int, Int) -> Unit = { _, _, _, _ -> },
+    onClearActiveFrame: () -> Unit = {},
     onDeleteFrame: (String) -> Unit,
     onOpenEventGallery: (String) -> Unit,
     onRegenerateAllEventPhotos: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showCreateDialog by remember { mutableStateOf(false) }
     var eventToEdit by remember { mutableStateOf<EventItem?>(null) }
     var eventForQrDialog by remember { mutableStateOf<EventItem?>(null) }
     var eventQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var eventToRegenerateAll by remember { mutableStateOf<EventItem?>(null) }
+
+    var pendingUpload by remember { mutableStateOf<PendingFrameUpload?>(null) }
+    var editingFrameTarget by remember { mutableStateOf<EditingFrameTarget?>(null) }
+    var isAnalyzingFrame by remember { mutableStateOf(false) }
+
+    val framePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        isAnalyzingFrame = true
+        scope.launch {
+            val fileName = withContext(Dispatchers.IO) {
+                var name = "custom_frame.png"
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0 && cursor.moveToFirst()) {
+                        name = cursor.getString(nameIndex) ?: name
+                    }
+                }
+                name
+            }
+            val bmp = withContext(Dispatchers.IO) {
+                BoothUtils.decodeBitmapFromUri(context, uri)
+            }
+            isAnalyzingFrame = false
+            if (bmp == null) {
+                Toast.makeText(context, "Failed to read PNG image", Toast.LENGTH_SHORT).show()
+            } else {
+                val ratio = bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)
+                val detectedFormat = if (ratio < 0.5f) "2R" else "4R"
+                pendingUpload = PendingFrameUpload(
+                    fileName = fileName,
+                    bitmap = bmp,
+                    format = detectedFormat
+                )
+            }
+        }
+    }
 
     LaunchedEffect(eventForQrDialog) {
         val ev = eventForQrDialog
@@ -704,22 +772,64 @@ private fun EventsAndFramesTab(
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    "🎞️ Photo Strip Frames & Layouts",
-                    style = TextStyle(
-                        brush = RetroTitleBrush,
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                )
-                Text(
-                    "Choose an active frame from cloud storage or generate a built-in retro template:",
-                    color = MutedCocoa,
-                    fontFamily = FontFamily.Serif,
-                    fontStyle = FontStyle.Italic,
-                    fontSize = 12.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "🎞️ Photo Strip Frames & Layouts",
+                            style = TextStyle(
+                                brush = RetroTitleBrush,
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        )
+                        Text(
+                            "Upload a custom transparent PNG frame (auto-detects photo slots) or pick a built-in template:",
+                            color = MutedCocoa,
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (settings.activeFrame != null) {
+                            OutlinedButton(
+                                onClick = onClearActiveFrame,
+                                enabled = !isBusy,
+                                border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.4f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Clear Active", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = { framePickerLauncher.launch("image/*") },
+                            enabled = !isBusy && !isAnalyzingFrame,
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (isAnalyzingFrame) "Analyzing…" else "Upload Custom PNG",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
                 // Quick Add Built-in Templates
                 Row(
@@ -750,7 +860,7 @@ private fun EventsAndFramesTab(
 
                 if (settings.frames.isEmpty()) {
                     Text(
-                        "No frames in database yet. Tap any template button above to create & activate one!",
+                        "No frames in database yet. Upload a custom PNG or tap any template button above!",
                         color = WarmGold,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -761,8 +871,29 @@ private fun EventsAndFramesTab(
                             FrameRowCard(
                                 frame = frame,
                                 isActive = settings.activeFrame?.id == frame.id,
-                                isBusy = isBusy,
+                                isBusy = isBusy || isAnalyzingFrame,
                                 onActivate = { onActivateFrame(frame.id) },
+                                onEditSlots = {
+                                    isAnalyzingFrame = true
+                                    scope.launch {
+                                        val bmp = RemoteRepository.downloadBitmap(frame.dataUrl)
+                                        isAnalyzingFrame = false
+                                        if (bmp == null) {
+                                            Toast.makeText(
+                                                context,
+                                                "Failed to load frame image for slot editor",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            editingFrameTarget = EditingFrameTarget(
+                                                existingFrameId = frame.id,
+                                                name = frame.name,
+                                                bitmap = bmp,
+                                                initialSlots = frame.slots
+                                            )
+                                        }
+                                    }
+                                },
                                 onDelete = { onDeleteFrame(frame.id) }
                             )
                         }
@@ -1111,6 +1242,191 @@ private fun EventsAndFramesTab(
             }
         }
     }
+
+    if (pendingUpload != null) {
+        val upload = pendingUpload!!
+        var frameTitle by remember(upload.fileName) { mutableStateOf(upload.fileName) }
+        var selectedFormat by remember(upload.format) { mutableStateOf(upload.format) }
+
+        Dialog(onDismissRequest = { pendingUpload = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Confirm Frame Size",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Text(
+                        "Select standard print format for \"${upload.fileName}\"",
+                        color = MutedCocoa,
+                        fontSize = 12.sp
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF1A1A28))
+                            .border(1.dp, BorderWarm, RoundedCornerShape(14.dp))
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap = upload.bitmap.asImageBitmap(),
+                            contentDescription = "Uploaded frame preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    Text(
+                        text = "Original Resolution: ${upload.bitmap.width} × ${upload.bitmap.height} px",
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+
+                    OutlinedTextField(
+                        value = frameTitle,
+                        onValueChange = { frameTitle = it },
+                        label = { Text("Frame Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Espresso,
+                            unfocusedTextColor = Espresso,
+                            focusedBorderColor = Terracotta,
+                            unfocusedBorderColor = BorderWarm
+                        )
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val formats = listOf(
+                            Triple("2R", "2R Photostrip", "2\" × 6\" Strip (1:3)"),
+                            Triple("4R", "4R Postcard", "4\" × 6\" Card (2:3)")
+                        )
+                        formats.forEach { (fmt, title, desc) ->
+                            val isSel = selectedFormat == fmt
+                            Surface(
+                                color = if (isSel) SoftPeach else SurfaceSand.copy(alpha = 0.6f),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(
+                                    if (isSel) 2.dp else 1.dp,
+                                    if (isSel) Terracotta else BorderWarm
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { selectedFormat = fmt }
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = title,
+                                        color = Espresso,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = desc,
+                                        color = MutedCocoa,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { pendingUpload = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BorderWarm)
+                        ) {
+                            Text("Cancel", color = Espresso)
+                        }
+                        Button(
+                            onClick = {
+                                val target = pendingUpload ?: return@Button
+                                val finalName = "${frameTitle.ifBlank { target.fileName }} ($selectedFormat)"
+                                pendingUpload = null
+                                isAnalyzingFrame = true
+                                scope.launch {
+                                    val detectedSlots = withContext(Dispatchers.Default) {
+                                        BoothUtils.detectSlots(target.bitmap)
+                                    }
+                                    isAnalyzingFrame = false
+                                    Toast.makeText(
+                                        context,
+                                        if (detectedSlots.isNotEmpty()) {
+                                            "Detected ${detectedSlots.size} slot(s) for $selectedFormat frame!"
+                                        } else {
+                                            "No transparent cutouts found — draw slots manually"
+                                        },
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    editingFrameTarget = EditingFrameTarget(
+                                        existingFrameId = null,
+                                        name = finalName,
+                                        bitmap = target.bitmap,
+                                        initialSlots = detectedSlots
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1.4f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White)
+                        ) {
+                            Text("Detect & Edit Slots", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (editingFrameTarget != null) {
+        val target = editingFrameTarget!!
+        FrameSlotEditorDialog(
+            frameName = target.name,
+            frameBitmap = target.bitmap,
+            initialSlots = target.initialSlots,
+            onDismiss = { editingFrameTarget = null },
+            onSave = { finalSlots ->
+                editingFrameTarget = null
+                if (target.existingFrameId == null) {
+                    onUploadCustomFrame(target.name, target.bitmap, finalSlots)
+                } else {
+                    onUpdateFrameSlots(
+                        target.existingFrameId,
+                        finalSlots,
+                        target.bitmap.width,
+                        target.bitmap.height
+                    )
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1119,6 +1435,7 @@ private fun FrameRowCard(
     isActive: Boolean,
     isBusy: Boolean,
     onActivate: () -> Unit,
+    onEditSlots: () -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -1172,6 +1489,19 @@ private fun FrameRowCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                OutlinedButton(
+                    onClick = onEditSlots,
+                    enabled = !isBusy,
+                    border = BorderStroke(1.dp, BorderWarm),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.GridOn, contentDescription = null, modifier = Modifier.size(14.dp), tint = Terracotta)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Edit Slots", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
                 if (isActive) {
                     Surface(
                         color = SageGreen.copy(alpha = 0.15f),
