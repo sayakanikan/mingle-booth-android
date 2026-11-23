@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import com.example.mingleboothkalakini.util.BoothUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -14,18 +15,61 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLException
 
 object RemoteRepository {
-    private val http = OkHttpClient.Builder()
+    // Fast-fail client for lightweight Supabase REST JSON queries with HTTP/2 keep-alive pings
+    private val dbHttp = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    // Generous client for Cloudinary image/GIF uploads and downloads
+    private val uploadHttp = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .writeTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+
+    fun resetConnections() {
+        dbHttp.connectionPool.evictAll()
+        uploadHttp.connectionPool.evictAll()
+    }
+
+    private fun formatDbError(e: Throwable): String = when (e) {
+        is SocketTimeoutException -> "Database connection timed out"
+        is UnknownHostException -> "No internet / cannot reach database"
+        is ConnectException -> "Failed to connect to database"
+        is SSLException -> "Secure connection interrupted"
+        is IOException -> "Network error: ${e.message ?: "connection dropped"}"
+        else -> e.message ?: "Database error"
+    }
+
+    private suspend fun <T> executeDbWithRecovery(block: () -> T): T {
+        return try {
+            block()
+        } catch (e: IOException) {
+            // Stale/half-open HTTP/2 or TCP socket in pool after venue Wi-Fi fluctuation:
+            // evict pooled connections and retry once on a fresh socket.
+            dbHttp.connectionPool.evictAll()
+            delay(250)
+            block()
+        }
+    }
 
     private fun supabaseRequest(pathAndQuery: String): Request.Builder {
         return Request.Builder()
@@ -34,7 +78,14 @@ object RemoteRepository {
             .header("Authorization", "Bearer ${AppConfig.SUPABASE_ANON_KEY}")
     }
 
-    suspend fun loadBoothSettings(): BoothSettings = withContext(Dispatchers.IO) {
+    suspend fun loadBoothSettings(): BoothSettings {
+        return when (val res = loadBoothSettingsResult()) {
+            is DbResult.Success -> res.data
+            is DbResult.Error -> BoothSettings()
+        }
+    }
+
+    suspend fun loadBoothSettingsResult(): DbResult<BoothSettings> = withContext(Dispatchers.IO) {
         try {
             val eventsArr = getJsonArray("events?select=*&order=is_active.desc,created_at.desc")
             var activeEvent: JSONObject? = null
@@ -54,13 +105,15 @@ object RemoteRepository {
             val activeFrame = frames.firstOrNull { it.isActive } ?: frames.firstOrNull()
 
             if (activeEvent == null) {
-                return@withContext BoothSettings(
-                    eventId = null,
-                    hasActiveEvent = false,
-                    eventTitle = "No Active Event",
-                    eventSubtitle = "Please activate an event in Admin",
-                    activeFrame = activeFrame,
-                    frames = frames
+                return@withContext DbResult.Success(
+                    BoothSettings(
+                        eventId = null,
+                        hasActiveEvent = false,
+                        eventTitle = "No Active Event",
+                        eventSubtitle = "Please activate an event in Admin",
+                        activeFrame = activeFrame,
+                        frames = frames
+                    )
                 )
             }
 
@@ -75,27 +128,29 @@ object RemoteRepository {
                 else -> "EXTERNAL"
             }
 
-            BoothSettings(
-                eventId = activeEvent.optString("id", "default"),
-                hasActiveEvent = true,
-                cameraFacing = facing,
-                cameraResolution = activeEvent.optString("camera_resolution", "1920x1080").ifBlank { "1920x1080" },
-                mirrorCamera = activeEvent.optBoolean("mirror_camera", true),
-                mirrorResult = activeEvent.optBoolean("mirror_result", true),
-                saveToLocalGallery = activeEvent.optBoolean("save_to_local_gallery", activeEvent.optBoolean("saveToLocalGallery", false)),
-                eventTitle = activeEvent.optString("title", "Mingle Booth").ifBlank { "Mingle Booth" },
-                eventSubtitle = activeEvent.optString("subtitle", "by Kala Kini").ifBlank { "by Kala Kini" },
-                brandLogoUrl = activeEvent.optString("brand_logo_data_url", "").takeIf { it.isNotBlank() && it != "null" },
-                stripBgColor = activeEvent.optString("strip_bg_color", "#1a1a28").ifBlank { "#1a1a28" },
-                stripTextColor = activeEvent.optString("strip_text_color", "#ffffff").ifBlank { "#ffffff" },
-                stripShowTitle = activeEvent.optBoolean("strip_show_title", true),
-                stripShowDate = activeEvent.optBoolean("strip_show_date", true),
-                activeFrame = activeFrame,
-                frames = frames
+            DbResult.Success(
+                BoothSettings(
+                    eventId = activeEvent.optString("id", "default"),
+                    hasActiveEvent = true,
+                    cameraFacing = facing,
+                    cameraResolution = activeEvent.optString("camera_resolution", "1920x1080").ifBlank { "1920x1080" },
+                    mirrorCamera = activeEvent.optBoolean("mirror_camera", true),
+                    mirrorResult = activeEvent.optBoolean("mirror_result", true),
+                    saveToLocalGallery = activeEvent.optBoolean("save_to_local_gallery", activeEvent.optBoolean("saveToLocalGallery", false)),
+                    eventTitle = activeEvent.optString("title", "Mingle Booth").ifBlank { "Mingle Booth" },
+                    eventSubtitle = activeEvent.optString("subtitle", "by Kala Kini").ifBlank { "by Kala Kini" },
+                    brandLogoUrl = activeEvent.optString("brand_logo_data_url", "").takeIf { it.isNotBlank() && it != "null" },
+                    stripBgColor = activeEvent.optString("strip_bg_color", "#1a1a28").ifBlank { "#1a1a28" },
+                    stripTextColor = activeEvent.optString("strip_text_color", "#ffffff").ifBlank { "#ffffff" },
+                    stripShowTitle = activeEvent.optBoolean("strip_show_title", true),
+                    stripShowDate = activeEvent.optBoolean("strip_show_date", true),
+                    activeFrame = activeFrame,
+                    frames = frames
+                )
             )
         } catch (e: Exception) {
             e.printStackTrace()
-            BoothSettings()
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
@@ -116,7 +171,14 @@ object RemoteRepository {
         }
     }
 
-    suspend fun getEvents(): List<EventItem> = withContext(Dispatchers.IO) {
+    suspend fun getEvents(): List<EventItem> {
+        return when (val res = getEventsResult()) {
+            is DbResult.Success -> res.data
+            is DbResult.Error -> emptyList()
+        }
+    }
+
+    suspend fun getEventsResult(): DbResult<List<EventItem>> = withContext(Dispatchers.IO) {
         try {
             val arr = getJsonArray("events?select=*,photo_sessions(id)&order=is_active.desc,created_at.desc")
             val list = mutableListOf<EventItem>()
@@ -145,27 +207,34 @@ object RemoteRepository {
                     )
                 )
             }
-            list
+            DbResult.Success(list)
         } catch (e: Exception) {
-            emptyList()
+            e.printStackTrace()
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
-    suspend fun createEvent(title: String, subtitle: String, activate: Boolean): Boolean = withContext(Dispatchers.IO) {
+    suspend fun createEvent(title: String, subtitle: String, activate: Boolean): Boolean {
+        return createEventResult(title, subtitle, activate) is DbResult.Success
+    }
+
+    suspend fun createEventResult(title: String, subtitle: String, activate: Boolean): DbResult<Unit> = withContext(Dispatchers.IO) {
         try {
             if (activate) {
                 patchJson("events?is_active=eq.true", JSONObject().put("is_active", false))
             }
+            // Generate UUID once before any retry and use upsert so retries never create duplicates
+            val eventId = UUID.randomUUID().toString()
             val payload = JSONObject()
-                .put("id", UUID.randomUUID().toString())
+                .put("id", eventId)
                 .put("title", title.trim())
                 .put("subtitle", subtitle.trim().ifBlank { "by Kala Kini" })
                 .put("is_active", activate)
-            postJson("events", payload)
-            true
+            postJson("events", payload, upsert = true)
+            DbResult.Success(Unit)
         } catch (e: Exception) {
             e.printStackTrace()
-            false
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
@@ -174,7 +243,16 @@ object RemoteRepository {
         title: String,
         subtitle: String,
         activate: Boolean
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean {
+        return updateEventResult(eventId, title, subtitle, activate) is DbResult.Success
+    }
+
+    suspend fun updateEventResult(
+        eventId: String,
+        title: String,
+        subtitle: String,
+        activate: Boolean
+    ): DbResult<Unit> = withContext(Dispatchers.IO) {
         try {
             if (activate) {
                 patchJson("events?is_active=eq.true", JSONObject().put("is_active", false))
@@ -186,21 +264,25 @@ object RemoteRepository {
                 payload.put("is_active", true)
             }
             patchJson("events?id=eq.$eventId", payload)
-            true
+            DbResult.Success(Unit)
         } catch (e: Exception) {
             e.printStackTrace()
-            false
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
-    suspend fun activateEvent(eventId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun activateEvent(eventId: String): Boolean {
+        return activateEventResult(eventId) is DbResult.Success
+    }
+
+    suspend fun activateEventResult(eventId: String): DbResult<Unit> = withContext(Dispatchers.IO) {
         try {
             patchJson("events?is_active=eq.true", JSONObject().put("is_active", false))
             patchJson("events?id=eq.$eventId", JSONObject().put("is_active", true))
-            true
+            DbResult.Success(Unit)
         } catch (e: Exception) {
             e.printStackTrace()
-            false
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
@@ -352,7 +434,14 @@ object RemoteRepository {
         }
     }
 
-    suspend fun getSessions(eventId: String? = null): List<PhotoSessionItem> = withContext(Dispatchers.IO) {
+    suspend fun getSessions(eventId: String? = null): List<PhotoSessionItem> {
+        return when (val res = getSessionsResult(eventId)) {
+            is DbResult.Success -> res.data
+            is DbResult.Error -> emptyList()
+        }
+    }
+
+    suspend fun getSessionsResult(eventId: String? = null): DbResult<List<PhotoSessionItem>> = withContext(Dispatchers.IO) {
         try {
             val filter = if (!eventId.isNullOrBlank()) "&event_id=eq.$eventId" else ""
             val arr = getJsonArray("photo_sessions?select=*,session_photos(*)$filter&order=created_at.desc&limit=100")
@@ -394,10 +483,10 @@ object RemoteRepository {
                     )
                 )
             }
-            list
+            DbResult.Success(list)
         } catch (e: Exception) {
             e.printStackTrace()
-            emptyList()
+            DbResult.Error(formatDbError(e), e)
         }
     }
 
@@ -673,7 +762,7 @@ object RemoteRepository {
                 return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             }
             val req = Request.Builder().url(urlOrDataUrl).build()
-            http.newCall(req).execute().use { resp ->
+            uploadHttp.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val bytes = resp.body?.bytes() ?: return@withContext null
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -691,7 +780,7 @@ object RemoteRepository {
                 return@withContext Base64.decode(base64Part, Base64.DEFAULT)
             }
             val req = Request.Builder().url(urlOrDataUrl).build()
-            http.newCall(req).execute().use { resp ->
+            uploadHttp.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 resp.body?.bytes()
             }
@@ -748,7 +837,7 @@ object RemoteRepository {
             .post(bodyBuilder.build())
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        uploadHttp.newCall(req).execute().use { resp ->
             val respText = resp.body?.string() ?: ""
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Cloudinary upload failed (${resp.code}): $respText")
@@ -783,7 +872,7 @@ object RemoteRepository {
                 .post(form)
                 .build()
 
-            http.newCall(req).execute().close()
+            uploadHttp.newCall(req).execute().close()
         } catch (_: Exception) {
         }
     }
@@ -820,53 +909,58 @@ object RemoteRepository {
         )
     }
 
-    private fun getJsonArray(pathAndQuery: String): JSONArray {
+    private suspend fun getJsonArray(pathAndQuery: String): JSONArray = executeDbWithRecovery {
         val req = supabaseRequest(pathAndQuery).get().build()
-        http.newCall(req).execute().use { resp ->
+        dbHttp.newCall(req).execute().use { resp ->
             val body = resp.body?.string() ?: "[]"
             if (!resp.isSuccessful) throw IllegalStateException("Supabase GET failed (${resp.code}): $body")
-            return JSONArray(body)
+            JSONArray(body)
         }
     }
 
-    private fun postJson(table: String, json: JSONObject) {
+    private suspend fun postJson(table: String, json: JSONObject, upsert: Boolean = false) = executeDbWithRecovery {
+        val preferHeader = if (upsert) "resolution=merge-duplicates,return=minimal" else "return=minimal"
         val req = supabaseRequest(table)
-            .header("Prefer", "return=minimal")
+            .header("Prefer", preferHeader)
             .post(json.toString().toRequestBody(jsonMedia))
             .build()
-        http.newCall(req).execute().use { resp ->
+        dbHttp.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Supabase POST failed (${resp.code}): ${resp.body?.string()}")
             }
         }
     }
 
-    private fun postJsonArray(table: String, jsonArray: JSONArray) {
+    private suspend fun postJsonArray(table: String, jsonArray: JSONArray) = executeDbWithRecovery {
         val req = supabaseRequest(table)
             .header("Prefer", "return=minimal")
             .post(jsonArray.toString().toRequestBody(jsonMedia))
             .build()
-        http.newCall(req).execute().use { resp ->
+        dbHttp.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Supabase POST array failed (${resp.code}): ${resp.body?.string()}")
             }
         }
     }
 
-    private fun patchJson(pathAndQuery: String, json: JSONObject) {
+    private suspend fun patchJson(pathAndQuery: String, json: JSONObject) = executeDbWithRecovery {
         val req = supabaseRequest(pathAndQuery)
             .header("Prefer", "return=minimal")
             .patch(json.toString().toRequestBody(jsonMedia))
             .build()
-        http.newCall(req).execute().use { resp ->
+        dbHttp.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Supabase PATCH failed (${resp.code}): ${resp.body?.string()}")
             }
         }
     }
 
-    private fun deleteRequest(pathAndQuery: String) {
+    private suspend fun deleteRequest(pathAndQuery: String) = executeDbWithRecovery {
         val req = supabaseRequest(pathAndQuery).delete().build()
-        http.newCall(req).execute().close()
+        dbHttp.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("Supabase DELETE failed (${resp.code}): ${resp.body?.string()}")
+            }
+        }
     }
 }

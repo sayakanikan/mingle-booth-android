@@ -191,6 +191,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
     val events by viewModel.events.collectAsState()
     val sessions by viewModel.sessions.collectAsState()
     val adminBusy by viewModel.adminBusy.collectAsState()
+    val dbError by viewModel.dbError.collectAsState()
     val adminStatusMessage by viewModel.adminStatusMessage.collectAsState()
     val batchProgress by viewModel.batchRegenerateState.collectAsState()
     val lastModifiedSlot by viewModel.lastModifiedSlot.collectAsState()
@@ -220,7 +221,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             isLoading = isLoading,
             onStart = { viewModel.startBoothCapture() },
             onOpenAdmin = { viewModel.openAdmin() },
-            onRefresh = { viewModel.refreshBoothSettings() }
+            onRefresh = { viewModel.reconnectDatabase() }
         )
 
         BoothStep.CAPTURE -> CaptureView(
@@ -274,6 +275,8 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             sessions = sessions,
             isBusy = adminBusy,
             adminStatusMessage = adminStatusMessage,
+            dbError = dbError,
+            onReconnectDb = { viewModel.reconnectDatabase() },
             batchProgress = batchProgress,
             onCreateEvent = { t, s, a -> viewModel.createNewEvent(t, s, a) },
             onUpdateEvent = { id, t, s, a -> viewModel.updateExistingEvent(id, t, s, a) },

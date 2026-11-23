@@ -89,6 +89,9 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
     private val _adminBusy = MutableStateFlow(false)
     val adminBusy: StateFlow<Boolean> = _adminBusy.asStateFlow()
 
+    private val _dbError = MutableStateFlow<String?>(null)
+    val dbError: StateFlow<String?> = _dbError.asStateFlow()
+
     private val _adminStatusMessage = MutableStateFlow("")
     val adminStatusMessage: StateFlow<String> = _adminStatusMessage.asStateFlow()
 
@@ -98,6 +101,11 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
     private var batchRegenerateJob: Job? = null
 
     init {
+        val cached = BoothSettingsCache.loadSettings(getApplication())
+        if (cached != null) {
+            _settings.value = cached
+            _cachedFrameBitmap.value = BoothSettingsCache.loadFrameBitmap(getApplication())
+        }
         refreshBoothSettings()
     }
 
@@ -109,15 +117,56 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         _toastMessage.value = null
     }
 
-    fun refreshBoothSettings() {
+    fun refreshBoothSettings(forceResetSockets: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
-            val loaded = RemoteRepository.loadBoothSettings()
-            _settings.value = loaded
-            _cachedFrameBitmap.value = loaded.activeFrame?.dataUrl?.takeIf { it.isNotBlank() }?.let {
-                RemoteRepository.downloadBitmap(it)
+            try {
+                if (forceResetSockets) {
+                    RemoteRepository.resetConnections()
+                }
+                when (val res = RemoteRepository.loadBoothSettingsResult()) {
+                    is DbResult.Success -> {
+                        _dbError.value = null
+                        val loaded = res.data
+                        _settings.value = loaded
+                        withContext(Dispatchers.IO) {
+                            BoothSettingsCache.saveSettings(getApplication(), loaded)
+                        }
+                        val frameBmp = loaded.activeFrame?.dataUrl?.takeIf { it.isNotBlank() }?.let {
+                            RemoteRepository.downloadBitmap(it)
+                        }
+                        if (frameBmp != null) {
+                            _cachedFrameBitmap.value = frameBmp
+                            withContext(Dispatchers.IO) {
+                                BoothSettingsCache.saveFrameBitmap(getApplication(), frameBmp)
+                            }
+                        } else if (loaded.activeFrame == null) {
+                            _cachedFrameBitmap.value = null
+                            withContext(Dispatchers.IO) {
+                                BoothSettingsCache.saveFrameBitmap(getApplication(), null)
+                            }
+                        }
+                    }
+                    is DbResult.Error -> {
+                        _dbError.value = res.message
+                        if (_settings.value.hasActiveEvent) {
+                            showToast("Network unstable — keeping current event")
+                        } else {
+                            showToast("DB unreachable: ${res.message}")
+                        }
+                    }
+                }
+            } finally {
+                _isLoading.value = false
             }
-            _isLoading.value = false
+        }
+    }
+
+    fun reconnectDatabase() {
+        if (_step.value == BoothStep.ADMIN_DASHBOARD) {
+            loadAdminData(forceResetSockets = true)
+        } else {
+            refreshBoothSettings(forceResetSockets = true)
         }
     }
 
@@ -311,19 +360,60 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         returnToScreensaver()
     }
 
-    fun loadAdminData(selectedEventId: String? = null) {
+    fun loadAdminData(selectedEventId: String? = null, forceResetSockets: Boolean = false) {
         viewModelScope.launch {
             _adminBusy.value = true
-            val loadedSettings = RemoteRepository.loadBoothSettings()
-            _settings.value = loadedSettings
-            _cachedFrameBitmap.value = loadedSettings.activeFrame?.dataUrl?.takeIf { it.isNotBlank() }?.let {
-                RemoteRepository.downloadBitmap(it)
+            try {
+                if (forceResetSockets) {
+                    RemoteRepository.resetConnections()
+                }
+                var firstError: String? = null
+                var activeSettings = _settings.value
+
+                when (val settingsRes = RemoteRepository.loadBoothSettingsResult()) {
+                    is DbResult.Success -> {
+                        activeSettings = settingsRes.data
+                        _settings.value = activeSettings
+                        withContext(Dispatchers.IO) {
+                            BoothSettingsCache.saveSettings(getApplication(), activeSettings)
+                        }
+                        val frameBmp = activeSettings.activeFrame?.dataUrl?.takeIf { it.isNotBlank() }?.let {
+                            RemoteRepository.downloadBitmap(it)
+                        }
+                        if (frameBmp != null) {
+                            _cachedFrameBitmap.value = frameBmp
+                            withContext(Dispatchers.IO) {
+                                BoothSettingsCache.saveFrameBitmap(getApplication(), frameBmp)
+                            }
+                        } else if (activeSettings.activeFrame == null) {
+                            _cachedFrameBitmap.value = null
+                        }
+                    }
+                    is DbResult.Error -> {
+                        firstError = settingsRes.message
+                    }
+                }
+
+                when (val evRes = RemoteRepository.getEventsResult()) {
+                    is DbResult.Success -> _events.value = evRes.data
+                    is DbResult.Error -> if (firstError == null) firstError = evRes.message
+                }
+
+                val targetEvent = selectedEventId ?: activeSettings.eventId
+                when (val sessRes = RemoteRepository.getSessionsResult(targetEvent)) {
+                    is DbResult.Success -> _sessions.value = sessRes.data
+                    is DbResult.Error -> if (firstError == null) firstError = sessRes.message
+                }
+
+                _dbError.value = firstError
+                if (firstError != null) {
+                    showToast("DB connection issue: $firstError")
+                } else if (forceResetSockets) {
+                    showToast("Database reconnected!")
+                }
+            } finally {
+                _adminBusy.value = false
             }
-            val evList = RemoteRepository.getEvents()
-            _events.value = evList
-            val targetEvent = selectedEventId ?: loadedSettings.eventId
-            _sessions.value = RemoteRepository.getSessions(targetEvent)
-            _adminBusy.value = false
         }
     }
 
@@ -334,13 +424,20 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _adminBusy.value = true
-            val ok = RemoteRepository.createEvent(title, subtitle, activateNow)
-            if (ok) {
-                showToast("Event created!")
-                loadAdminData()
-            } else {
+            try {
+                when (val res = RemoteRepository.createEventResult(title, subtitle, activateNow)) {
+                    is DbResult.Success -> {
+                        _dbError.value = null
+                        showToast("Event created!")
+                        loadAdminData()
+                    }
+                    is DbResult.Error -> {
+                        _dbError.value = res.message
+                        showToast("Failed to create event: ${res.message}")
+                    }
+                }
+            } finally {
                 _adminBusy.value = false
-                showToast("Failed to create event")
             }
         }
     }
@@ -352,13 +449,20 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _adminBusy.value = true
-            val ok = RemoteRepository.updateEvent(eventId, title, subtitle, activateNow)
-            if (ok) {
-                showToast("Event updated successfully!")
-                loadAdminData(if (activateNow) eventId else null)
-            } else {
+            try {
+                when (val res = RemoteRepository.updateEventResult(eventId, title, subtitle, activateNow)) {
+                    is DbResult.Success -> {
+                        _dbError.value = null
+                        showToast("Event updated successfully!")
+                        loadAdminData(if (activateNow) eventId else null)
+                    }
+                    is DbResult.Error -> {
+                        _dbError.value = res.message
+                        showToast("Failed to update event: ${res.message}")
+                    }
+                }
+            } finally {
                 _adminBusy.value = false
-                showToast("Failed to update event")
             }
         }
     }
@@ -366,13 +470,20 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
     fun setActiveEvent(eventId: String) {
         viewModelScope.launch {
             _adminBusy.value = true
-            val ok = RemoteRepository.activateEvent(eventId)
-            if (ok) {
-                showToast("Active event switched!")
-                loadAdminData(eventId)
-            } else {
+            try {
+                when (val res = RemoteRepository.activateEventResult(eventId)) {
+                    is DbResult.Success -> {
+                        _dbError.value = null
+                        showToast("Active event switched!")
+                        loadAdminData(eventId)
+                    }
+                    is DbResult.Error -> {
+                        _dbError.value = res.message
+                        showToast("Failed to switch event: ${res.message}")
+                    }
+                }
+            } finally {
                 _adminBusy.value = false
-                showToast("Failed to switch event")
             }
         }
     }

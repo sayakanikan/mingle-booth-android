@@ -195,6 +195,8 @@ fun AdminDashboardScreen(
     onRegenerateAllEventPhotos: (String, String) -> Unit = { _, _ -> },
     onCancelBatchRegeneration: () -> Unit = {},
     adminStatusMessage: String = "",
+    dbError: String? = null,
+    onReconnectDb: () -> Unit = {},
     onFilterGalleryByEvent: (String?) -> Unit,
     onReturnToBooth: () -> Unit,
     onLogout: () -> Unit
@@ -258,6 +260,32 @@ fun AdminDashboardScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        onClick = onReconnectDb,
+                        enabled = !isBusy,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(
+                            1.dp,
+                            if (dbError != null) Color(0xFFDC2626).copy(alpha = 0.6f) else BorderWarm
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (dbError != null) Color(0xFFDC2626) else Espresso
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Reconnect DB",
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (dbError != null) "Reconnect DB" else "Sync",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
                     Box(
                         modifier = Modifier
                             .shadow(4.dp, RoundedCornerShape(50), spotColor = Terracotta)
@@ -314,6 +342,65 @@ fun AdminDashboardScreen(
                         )
                     }
                 )
+            }
+        }
+
+        // Database Connection Warning Banner
+        if (dbError != null) {
+            Surface(
+                color = Color(0xFFFEE2E2),
+                border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.45f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.WifiOff,
+                            contentDescription = null,
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Database Connection Issue",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = Color(0xFF991B1B)
+                            )
+                            Text(
+                                text = dbError,
+                                fontSize = 11.sp,
+                                color = Color(0xFF7F1D1D),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = onReconnectDb,
+                        enabled = !isBusy,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDC2626),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Reconnect DB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
 
@@ -440,6 +527,8 @@ fun AdminDashboardScreen(
                     settings = settings,
                     events = events,
                     isBusy = isBusy,
+                    dbError = dbError,
+                    onReconnectDb = onReconnectDb,
                     batchProgress = batchProgress,
                     onCreateEvent = onCreateEvent,
                     onUpdateEvent = onUpdateEvent,
@@ -496,6 +585,8 @@ private fun EventsAndFramesTab(
     settings: BoothSettings,
     events: List<EventItem>,
     isBusy: Boolean,
+    dbError: String? = null,
+    onReconnectDb: () -> Unit = {},
     batchProgress: BatchRegenerateProgress = BatchRegenerateProgress(),
     onCreateEvent: (String, String, Boolean) -> Unit,
     onUpdateEvent: (String, String, String, Boolean) -> Unit,
@@ -616,6 +707,48 @@ private fun EventsAndFramesTab(
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("New Event", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (events.isEmpty()) {
+                    Surface(
+                        color = SurfaceSand.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, BorderWarm),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (dbError != null) "Unable to load events from database" else "No events created yet",
+                                color = Espresso,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = dbError ?: "Tap \"New Event\" to create your first photobooth event.",
+                                color = MutedCocoa,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            if (dbError != null) {
+                                Button(
+                                    onClick = onReconnectDb,
+                                    enabled = !isBusy,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Reconnect DB", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
 

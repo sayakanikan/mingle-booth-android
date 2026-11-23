@@ -134,3 +134,9 @@ data class BatchRegenerateProgress(
         get() = (progressFraction * 100).toInt().coerceIn(0, 100)
 }
 
+sealed class DbResult<out T> {
+    data class Success<T>(val data: T) : DbResult<T>()
+    data class Error(val message: String, val cause: Throwable? = null) : DbResult<Nothing>()
+}
+
+
