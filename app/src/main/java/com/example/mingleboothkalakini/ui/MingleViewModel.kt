@@ -87,6 +87,9 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
     private val _adminBusy = MutableStateFlow(false)
     val adminBusy: StateFlow<Boolean> = _adminBusy.asStateFlow()
 
+    private val _adminStatusMessage = MutableStateFlow("")
+    val adminStatusMessage: StateFlow<String> = _adminStatusMessage.asStateFlow()
+
     init {
         refreshBoothSettings()
     }
@@ -330,6 +333,24 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateExistingEvent(eventId: String, title: String, subtitle: String, activateNow: Boolean) {
+        if (title.isBlank()) {
+            showToast("Event title is required")
+            return
+        }
+        viewModelScope.launch {
+            _adminBusy.value = true
+            val ok = RemoteRepository.updateEvent(eventId, title, subtitle, activateNow)
+            if (ok) {
+                showToast("Event updated successfully!")
+                loadAdminData(if (activateNow) eventId else null)
+            } else {
+                _adminBusy.value = false
+                showToast("Failed to update event")
+            }
+        }
+    }
+
     fun setActiveEvent(eventId: String) {
         viewModelScope.launch {
             _adminBusy.value = true
@@ -454,6 +475,49 @@ class MingleViewModel(application: Application) : AndroidViewModel(application) 
                 showToast("Failed to delete session")
             }
             _adminBusy.value = false
+        }
+    }
+
+    fun regenerateSessionItem(session: PhotoSessionItem) {
+        viewModelScope.launch {
+            _adminBusy.value = true
+            _adminStatusMessage.value = "Starting regeneration for #${session.id.takeLast(6).uppercase()}…"
+            try {
+                val updated = RemoteRepository.regenerateSession(
+                    session = session,
+                    settings = _settings.value,
+                    onProgress = { msg ->
+                        _adminStatusMessage.value = msg
+                    }
+                )
+                if (updated != null) {
+                    if (_settings.value.saveToLocalGallery) {
+                        _adminStatusMessage.value = "Updating local gallery backup…"
+                        val rawPhotos = updated.photos.mapNotNull { RemoteRepository.downloadBitmap(it.url) }
+                        val stripBmp = RemoteRepository.downloadBitmap(updated.stripUrl)
+                        if (stripBmp != null) {
+                            BoothUtils.saveSessionToLocalGallery(
+                                context = getApplication(),
+                                sessionId = updated.id,
+                                eventTitle = _settings.value.eventTitle,
+                                stripBitmap = stripBmp,
+                                gifBytes = null,
+                                originalPhotos = rawPhotos
+                            )
+                        }
+                    }
+                    _sessions.value = _sessions.value.map { if (it.id == updated.id) updated else it }
+                    showToast("Session #${session.id.takeLast(6).uppercase()} regenerated successfully!")
+                } else {
+                    showToast("Failed to regenerate session #${session.id.takeLast(6).uppercase()}")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                showToast("Regeneration error: ${e.message}")
+            } finally {
+                _adminBusy.value = false
+                _adminStatusMessage.value = ""
+            }
         }
     }
 }

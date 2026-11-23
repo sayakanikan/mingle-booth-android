@@ -1,8 +1,12 @@
 package com.example.mingleboothkalakini.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -31,6 +35,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -166,6 +171,7 @@ fun AdminDashboardScreen(
     sessions: List<PhotoSessionItem>,
     isBusy: Boolean,
     onCreateEvent: (String, String, Boolean) -> Unit,
+    onUpdateEvent: (String, String, String, Boolean) -> Unit = { _, _, _, _ -> },
     onActivateEvent: (String) -> Unit,
     onDeleteEvent: (String) -> Unit,
     onActivateFrame: (String) -> Unit,
@@ -173,6 +179,8 @@ fun AdminDashboardScreen(
     onDeleteFrame: (String) -> Unit,
     onSaveCameraAndBranding: (String, String, Boolean, Boolean, String, String, Boolean, Boolean, Boolean) -> Unit,
     onDeleteSession: (PhotoSessionItem) -> Unit,
+    onRegenerateSession: (PhotoSessionItem) -> Unit = {},
+    adminStatusMessage: String = "",
     onFilterGalleryByEvent: (String?) -> Unit,
     onReturnToBooth: () -> Unit,
     onLogout: () -> Unit
@@ -301,6 +309,33 @@ fun AdminDashboardScreen(
                 trackColor = SoftPeach,
                 modifier = Modifier.fillMaxWidth()
             )
+            if (adminStatusMessage.isNotBlank()) {
+                Surface(
+                    color = SoftPeach.copy(alpha = 0.85f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = Terracotta
+                        )
+                        Text(
+                            text = adminStatusMessage,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = Espresso
+                        )
+                    }
+                }
+            }
         }
 
         // Content
@@ -311,6 +346,7 @@ fun AdminDashboardScreen(
                     events = events,
                     isBusy = isBusy,
                     onCreateEvent = onCreateEvent,
+                    onUpdateEvent = onUpdateEvent,
                     onActivateEvent = onActivateEvent,
                     onDeleteEvent = onDeleteEvent,
                     onActivateFrame = onActivateFrame,
@@ -330,8 +366,10 @@ fun AdminDashboardScreen(
                     sessions = sessions,
                     events = events,
                     activeEventId = settings.eventId,
+                    isBusy = isBusy,
                     onFilterByEvent = onFilterGalleryByEvent,
-                    onDeleteSession = onDeleteSession
+                    onDeleteSession = onDeleteSession,
+                    onRegenerateSession = onRegenerateSession
                 )
             }
         }
@@ -344,6 +382,7 @@ private fun EventsAndFramesTab(
     events: List<EventItem>,
     isBusy: Boolean,
     onCreateEvent: (String, String, Boolean) -> Unit,
+    onUpdateEvent: (String, String, String, Boolean) -> Unit,
     onActivateEvent: (String) -> Unit,
     onDeleteEvent: (String) -> Unit,
     onActivateFrame: (String) -> Unit,
@@ -351,7 +390,19 @@ private fun EventsAndFramesTab(
     onDeleteFrame: (String) -> Unit,
     onOpenEventGallery: (String) -> Unit
 ) {
+    val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
+    var eventToEdit by remember { mutableStateOf<EventItem?>(null) }
+    var eventForQrDialog by remember { mutableStateOf<EventItem?>(null) }
+    var eventQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(eventForQrDialog) {
+        val ev = eventForQrDialog
+        if (ev != null) {
+            eventQrBitmap = null
+            eventQrBitmap = BoothUtils.generateQrBitmap(ev.galleryUrl, 512)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -459,7 +510,10 @@ private fun EventsAndFramesTab(
                                 )
                             }
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 if (!ev.isActive) {
                                     FilledTonalButton(
                                         onClick = { onActivateEvent(ev.id) },
@@ -468,19 +522,56 @@ private fun EventsAndFramesTab(
                                             containerColor = SoftPeach,
                                             contentColor = Espresso
                                         ),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
-                                        Text("Activate", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Activate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
+
+                                IconButton(
+                                    onClick = { eventToEdit = ev },
+                                    enabled = !isBusy
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit Event", tint = Terracotta)
+                                }
+
+                                IconButton(
+                                    onClick = { eventForQrDialog = ev },
+                                    enabled = !isBusy
+                                ) {
+                                    Icon(Icons.Default.QrCode, contentDescription = "Show All Photos Barcode / QR", tint = Terracotta)
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
+                                        Toast.makeText(context, "Copied link for all photos: ${ev.galleryUrl}", Toast.LENGTH_SHORT).show()
+                                    },
+                                    enabled = !isBusy
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link for All Photos", tint = Espresso)
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
+                                        context.startActivity(intent)
+                                    },
+                                    enabled = !isBusy
+                                ) {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
+                                }
+
                                 OutlinedButton(
                                     onClick = { onOpenEventGallery(ev.id) },
                                     border = BorderStroke(1.dp, BorderWarm),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
                                 ) {
-                                    Text("Photos", fontSize = 12.sp)
+                                    Text("Photos", fontSize = 11.sp)
                                 }
+
                                 if (ev.id != "default") {
                                     IconButton(
                                         onClick = { onDeleteEvent(ev.id) },
@@ -642,6 +733,198 @@ private fun EventsAndFramesTab(
                 }
             }
         )
+    }
+
+    if (eventToEdit != null) {
+        val ev = eventToEdit!!
+        var title by remember(ev.id) { mutableStateOf(ev.title) }
+        var subtitle by remember(ev.id) { mutableStateOf(ev.subtitle) }
+        var activateNow by remember(ev.id) { mutableStateOf(ev.isActive) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isBusy) eventToEdit = null },
+            containerColor = CardCream,
+            titleContentColor = Espresso,
+            textContentColor = MutedCocoa,
+            title = { Text("Edit Event", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Event / Couple Title *") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Espresso,
+                            unfocusedTextColor = Espresso,
+                            focusedBorderColor = Terracotta,
+                            unfocusedBorderColor = BorderWarm
+                        )
+                    )
+                    OutlinedTextField(
+                        value = subtitle,
+                        onValueChange = { subtitle = it },
+                        label = { Text("Subtitle / Date") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Espresso,
+                            unfocusedTextColor = Espresso,
+                            focusedBorderColor = Terracotta,
+                            unfocusedBorderColor = BorderWarm
+                        )
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = activateNow,
+                            onCheckedChange = { activateNow = it },
+                            enabled = !ev.isActive,
+                            colors = CheckboxDefaults.colors(checkedColor = Terracotta)
+                        )
+                        Text(
+                            if (ev.isActive) "Currently Active Event" else "Set as Active Event immediately",
+                            color = Espresso,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdateEvent(ev.id, title, subtitle, activateNow)
+                        eventToEdit = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White)
+                ) {
+                    Text("Save Changes", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { eventToEdit = null }) {
+                    Text("Cancel", color = MutedCocoa)
+                }
+            }
+        )
+    }
+
+    if (eventForQrDialog != null) {
+        val ev = eventForQrDialog!!
+        Dialog(onDismissRequest = { eventForQrDialog = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "All Photos Barcode / QR",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${ev.title} · ${ev.subtitle}",
+                        color = Espresso,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        ev.galleryUrl,
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(16.dp))
+
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, BorderWarm),
+                        modifier = Modifier.size(220.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (eventQrBitmap != null) {
+                                Image(
+                                    bitmap = eventQrBitmap!!.asImageBitmap(),
+                                    contentDescription = "Event Photos Barcode QR",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(12.dp)
+                                )
+                            } else {
+                                CircularProgressIndicator(color = Terracotta)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Scan barcode / QR with phone camera to view and download all photos from this event.",
+                        color = MutedCocoa,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
+                                Toast.makeText(context, "Copied link to clipboard!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = SoftPeach,
+                                contentColor = Espresso
+                            )
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copy Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        FilledTonalButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = SoftPeach,
+                                contentColor = Espresso
+                            )
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Espresso, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { eventForQrDialog = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("Close", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1460,19 +1743,32 @@ private fun GalleryTab(
     sessions: List<PhotoSessionItem>,
     events: List<EventItem>,
     activeEventId: String?,
+    isBusy: Boolean = false,
     onFilterByEvent: (String?) -> Unit,
-    onDeleteSession: (PhotoSessionItem) -> Unit
+    onDeleteSession: (PhotoSessionItem) -> Unit,
+    onRegenerateSession: (PhotoSessionItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedFilterId by remember(activeEventId) { mutableStateOf(activeEventId) }
     var qrDialogSession by remember { mutableStateOf<PhotoSessionItem?>(null) }
     var qrDialogBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var sessionToRegenerate by remember { mutableStateOf<PhotoSessionItem?>(null) }
+    var eventQrDialogForGallery by remember { mutableStateOf<EventItem?>(null) }
+    var eventQrBitmapForGallery by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(qrDialogSession) {
         val s = qrDialogSession
         if (s != null) {
             qrDialogBitmap = null
             qrDialogBitmap = BoothUtils.generateQrBitmap(s.viewerUrl, 512)
+        }
+    }
+
+    LaunchedEffect(eventQrDialogForGallery) {
+        val ev = eventQrDialogForGallery
+        if (ev != null) {
+            eventQrBitmapForGallery = null
+            eventQrBitmapForGallery = BoothUtils.generateQrBitmap(ev.galleryUrl, 512)
         }
     }
 
@@ -1517,6 +1813,75 @@ private fun GalleryTab(
                         labelColor = MutedCocoa
                     )
                 )
+            }
+        }
+
+        val currentEvent = events.find { it.id == selectedFilterId }
+        if (currentEvent != null) {
+            Surface(
+                color = SoftPeach.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Terracotta.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Event Web Gallery",
+                                color = Espresso,
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                currentEvent.galleryUrl,
+                                color = Terracotta,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            "Scan QR or copy link to view all photos captured for this event",
+                            color = MutedCocoa,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(
+                            onClick = { eventQrDialogForGallery = currentEvent }
+                        ) {
+                            Icon(Icons.Default.QrCode, contentDescription = "Event Barcode QR", tint = Terracotta)
+                        }
+                        IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", currentEvent.galleryUrl))
+                                Toast.makeText(context, "Copied link for all photos: ${currentEvent.galleryUrl}", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Event Link", tint = Espresso)
+                        }
+                        IconButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentEvent.galleryUrl))
+                                context.startActivity(intent)
+                            }
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
+                        }
+                    }
+                }
             }
         }
 
@@ -1583,29 +1948,117 @@ private fun GalleryTab(
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(
-                                    onClick = { qrDialogSession = session }
+                                    onClick = { qrDialogSession = session },
+                                    enabled = !isBusy
                                 ) {
                                     Icon(Icons.Default.QrCode, contentDescription = "Show QR", tint = Terracotta)
+                                }
+
+                                IconButton(
+                                    onClick = { sessionToRegenerate = session },
+                                    enabled = !isBusy
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Regenerate Session Assets", tint = Terracotta)
                                 }
 
                                 IconButton(
                                     onClick = {
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(session.viewerUrl))
                                         context.startActivity(intent)
-                                    }
+                                    },
+                                    enabled = !isBusy
                                 ) {
                                     Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Viewer", tint = Espresso)
                                 }
 
                                 IconButton(
-                                    onClick = { onDeleteSession(session) }
+                                    onClick = { onDeleteSession(session) },
+                                    enabled = !isBusy
                                 ) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete Session", tint = Color(0xFFDC2626))
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (sessionToRegenerate != null) {
+        val s = sessionToRegenerate!!
+        Dialog(onDismissRequest = { if (!isBusy) sessionToRegenerate = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Regenerate Session Photos",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "[ SESSION #${s.id.takeLast(6).uppercase()} ]",
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Regenerate this session from its original raw photos?\n\nThis will re-composite the high-resolution photo strip and re-encode the animated GIF with crisp colors and smooth dithering.",
+                        color = Espresso,
+                        fontFamily = FontFamily.SansSerif,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { sessionToRegenerate = null },
+                            enabled = !isBusy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, BorderWarm)
+                        ) {
+                            Text("Cancel", color = Espresso)
+                        }
+
+                        Button(
+                            onClick = {
+                                val target = sessionToRegenerate
+                                sessionToRegenerate = null
+                                if (target != null) {
+                                    onRegenerateSession(target)
+                                }
+                            },
+                            enabled = !isBusy,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White)
+                        ) {
+                            Text("Regenerate", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1668,6 +2121,126 @@ private fun GalleryTab(
                         shape = RoundedCornerShape(50)
                     ) {
                         Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    if (eventQrDialogForGallery != null) {
+        val ev = eventQrDialogForGallery!!
+        Dialog(onDismissRequest = { eventQrDialogForGallery = null }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardCream),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.5.dp, Terracotta.copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .background(RetroCardBrush)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "All Photos Barcode / QR",
+                        style = TextStyle(
+                            brush = RetroTitleBrush,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${ev.title} · ${ev.subtitle}",
+                        color = Espresso,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        ev.galleryUrl,
+                        color = Terracotta,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(16.dp))
+
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, BorderWarm),
+                        modifier = Modifier.size(220.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (eventQrBitmapForGallery != null) {
+                                Image(
+                                    bitmap = eventQrBitmapForGallery!!.asImageBitmap(),
+                                    contentDescription = "Event Photos Barcode QR",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(12.dp)
+                                )
+                            } else {
+                                CircularProgressIndicator(color = Terracotta)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Scan barcode / QR with phone camera to view and download all photos from this event.",
+                        color = MutedCocoa,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
+                                Toast.makeText(context, "Copied link to clipboard!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = SoftPeach,
+                                contentColor = Espresso
+                            )
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copy Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        FilledTonalButton(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = SoftPeach,
+                                contentColor = Espresso
+                            )
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Espresso, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { eventQrDialogForGallery = null },
+                            colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("Close", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }

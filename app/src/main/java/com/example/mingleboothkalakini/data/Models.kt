@@ -52,7 +52,10 @@ data class EventItem(
     val isActive: Boolean,
     val createdAt: String,
     val sessionCount: Int = 0
-)
+) {
+    val galleryUrl: String
+        get() = "${AppConfig.WEB_VIEWER_BASE_URL}/e/$id"
+}
 
 data class SessionPhotoItem(
     val slotIndex: Int,

@@ -3,6 +3,7 @@ package com.example.mingleboothkalakini.data
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import com.example.mingleboothkalakini.util.BoothUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -161,6 +162,30 @@ object RemoteRepository {
                 .put("subtitle", subtitle.trim().ifBlank { "by Kala Kini" })
                 .put("is_active", activate)
             postJson("events", payload)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    suspend fun updateEvent(
+        eventId: String,
+        title: String,
+        subtitle: String,
+        activate: Boolean
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (activate) {
+                patchJson("events?is_active=eq.true", JSONObject().put("is_active", false))
+            }
+            val payload = JSONObject()
+                .put("title", title.trim())
+                .put("subtitle", subtitle.trim().ifBlank { "by Kala Kini" })
+            if (activate) {
+                payload.put("is_active", true)
+            }
+            patchJson("events?id=eq.$eventId", payload)
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -457,6 +482,132 @@ object RemoteRepository {
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    suspend fun regenerateSession(
+        session: PhotoSessionItem,
+        settings: BoothSettings,
+        onProgress: (String) -> Unit
+    ): PhotoSessionItem? = withContext(Dispatchers.IO) {
+        try {
+            var rawPhotos = session.photos.sortedBy { it.slotIndex }
+            if (rawPhotos.isEmpty()) {
+                onProgress("Fetching raw photos list from database…")
+                val queriedArr = getJsonArray("session_photos?session_id=eq.${session.id}&order=slot_index.asc")
+                val fetched = mutableListOf<SessionPhotoItem>()
+                for (j in 0 until queriedArr.length()) {
+                    val p = queriedArr.getJSONObject(j)
+                    fetched.add(
+                        SessionPhotoItem(
+                            slotIndex = p.optInt("slot_index", j),
+                            url = p.optString("url", ""),
+                            slotX = p.optInt("slot_x", 0),
+                            slotY = p.optInt("slot_y", 0),
+                            slotW = p.optInt("slot_w", 0),
+                            slotH = p.optInt("slot_h", 0)
+                        )
+                    )
+                }
+                rawPhotos = fetched.sortedBy { it.slotIndex }
+            }
+
+            if (rawPhotos.isEmpty()) {
+                onProgress("No raw photos found for session #${session.id.takeLast(6).uppercase()}")
+                return@withContext null
+            }
+
+            // Download original raw photos
+            val downloadedBitmaps = mutableListOf<Bitmap>()
+            for (i in rawPhotos.indices) {
+                onProgress("Downloading raw photo ${i + 1} of ${rawPhotos.size}…")
+                val bmp = downloadBitmap(rawPhotos[i].url)
+                if (bmp == null) {
+                    onProgress("Failed to download raw photo ${i + 1}")
+                    return@withContext null
+                }
+                downloadedBitmaps.add(bmp)
+            }
+
+            // Determine matching frame and frame artwork
+            val matchedFrame = settings.frames.firstOrNull { it.id == session.frameUrl } ?: settings.activeFrame
+            val effectiveSettings = settings.copy(activeFrame = matchedFrame)
+
+            val frameBitmap = if (!matchedFrame?.dataUrl.isNullOrBlank()) {
+                onProgress("Loading frame overlay…")
+                downloadBitmap(matchedFrame!!.dataUrl)
+            } else null
+
+            // Re-composite strip
+            onProgress("Compositing new photo strip…")
+            val stripBitmap = BoothUtils.composeStrip(
+                photos = downloadedBitmaps,
+                settings = effectiveSettings,
+                cachedFrameBitmap = frameBitmap
+            )
+
+            // Re-encode animated GIF
+            onProgress("Encoding improved animated GIF…")
+            val gifBytes = BoothUtils.buildAnimatedGif(downloadedBitmaps)
+
+            val slug = settings.eventTitle.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').take(40).ifBlank { "event" }
+            val commonTags = listOf("mingle-booth", slug, "session_${session.id}", "regenerated")
+
+            // Upload new strip
+            onProgress("Uploading new photo strip…")
+            val newStripUrl = uploadBitmapToCloudinary(
+                bitmap = stripBitmap,
+                subfolder = "strips",
+                publicIdHint = "${slug}_strip_${session.id}_regen_${System.currentTimeMillis()}",
+                tags = commonTags + "strip",
+                asPng = false
+            )
+
+            // Upload new GIF
+            var newGifUrl: String? = null
+            if (gifBytes != null) {
+                onProgress("Uploading new animated GIF…")
+                newGifUrl = uploadBytesToCloudinary(
+                    bytes = gifBytes,
+                    mimeType = "image/gif",
+                    fileName = "anim_${session.id}.gif",
+                    subfolder = "gifs",
+                    publicIdHint = "${slug}_gif_${session.id}_regen_${System.currentTimeMillis()}",
+                    tags = commonTags + "gif"
+                )
+            }
+
+            // Update database record in photo_sessions
+            onProgress("Updating session database record…")
+            val updatePayload = JSONObject()
+                .put("strip_url", newStripUrl)
+                .put("strip_w", stripBitmap.width)
+                .put("strip_h", stripBitmap.height)
+            if (newGifUrl != null) {
+                updatePayload.put("gif_url", newGifUrl)
+            }
+            patchJson("photo_sessions?id=eq.${session.id}", updatePayload)
+
+            // Clean up old assets if they were on Cloudinary
+            val oldAssets = listOfNotNull(
+                session.stripUrl.takeIf { it != newStripUrl },
+                session.gifUrl.takeIf { it != newGifUrl }
+            )
+            oldAssets.mapNotNull { extractCloudinaryPublicId(it) }.distinct().forEach { publicId ->
+                destroyCloudinaryAsset(publicId)
+            }
+
+            session.copy(
+                stripUrl = newStripUrl,
+                gifUrl = newGifUrl ?: session.gifUrl,
+                stripW = stripBitmap.width,
+                stripH = stripBitmap.height,
+                photos = rawPhotos
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            onProgress("Error: ${e.message}")
+            null
         }
     }
 

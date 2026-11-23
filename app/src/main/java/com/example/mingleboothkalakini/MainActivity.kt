@@ -191,6 +191,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
     val events by viewModel.events.collectAsState()
     val sessions by viewModel.sessions.collectAsState()
     val adminBusy by viewModel.adminBusy.collectAsState()
+    val adminStatusMessage by viewModel.adminStatusMessage.collectAsState()
     val lastModifiedSlot by viewModel.lastModifiedSlot.collectAsState()
     val photosRevision by viewModel.photosRevision.collectAsState()
 
@@ -271,7 +272,9 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
             events = events,
             sessions = sessions,
             isBusy = adminBusy,
+            adminStatusMessage = adminStatusMessage,
             onCreateEvent = { t, s, a -> viewModel.createNewEvent(t, s, a) },
+            onUpdateEvent = { id, t, s, a -> viewModel.updateExistingEvent(id, t, s, a) },
             onActivateEvent = { id -> viewModel.setActiveEvent(id) },
             onDeleteEvent = { id -> viewModel.removeEvent(id) },
             onActivateFrame = { id -> viewModel.setActiveFrame(id) },
@@ -281,6 +284,7 @@ fun MingleBoothApp(viewModel: MingleViewModel) {
                 viewModel.saveCameraAndBranding(facing, res, mirCam, mirRes, bg, txt, showT, showD, saveLocal)
             },
             onDeleteSession = { sess -> viewModel.deleteSessionItem(sess) },
+            onRegenerateSession = { sess -> viewModel.regenerateSessionItem(sess) },
             onFilterGalleryByEvent = { evId -> viewModel.loadAdminData(evId) },
             onReturnToBooth = { viewModel.returnToScreensaver() },
             onLogout = { viewModel.logoutAdmin() }

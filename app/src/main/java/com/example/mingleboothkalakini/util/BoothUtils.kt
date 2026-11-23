@@ -558,7 +558,7 @@ object BoothUtils {
             val (targetW, targetH) = if (width > 0 && height > 0) {
                 width to height
             } else {
-                val maxDim = 540
+                val maxDim = 720
                 if (first.width >= first.height) {
                     val w = maxDim
                     val h = ((maxDim.toFloat() * first.height) / first.width).roundToInt()
@@ -995,8 +995,8 @@ object BoothUtils {
 
 /**
  * High-fidelity 256-color GIF89a animated encoder.
- * Uses adaptive Median-Cut color quantization, 15-bit RGB nearest-match lookup table (LUT),
- * Floyd-Steinberg error diffusion dithering, and GIF89a LZW encoding.
+ * Uses adaptive perceptual Median-Cut color quantization, RGB565 nearest-match lookup table (LUT),
+ * serpentine clamped Floyd-Steinberg error diffusion dithering, and spec-compliant GIF89a LZW encoding.
  */
 object SimpleGifEncoder {
     fun encode(frames: List<Bitmap>, delayMs: Int): ByteArray {
@@ -1057,7 +1057,7 @@ object SimpleGifEncoder {
             writeShort(out, h)
             out.write(0) // No local color table, not interlaced
 
-            // Quantize pixels using LUT and Floyd-Steinberg error diffusion dithering
+            // Quantize pixels using RGB565 LUT and serpentine clamped Floyd-Steinberg dithering
             val indexed = quantizeWithDithering(frame, palette, lut)
             lzwEncode(out, indexed)
         }
@@ -1087,7 +1087,10 @@ object SimpleGifEncoder {
         }
 
         val count: Int get() = end - start
-        val volume: Int get() = maxOf(maxR - minR, maxG - minG, maxB - minB)
+        val rRange: Int get() = ((maxR - minR) * 299) / 1000
+        val gRange: Int get() = ((maxG - minG) * 587) / 1000
+        val bRange: Int get() = ((maxB - minB) * 114) / 1000
+        val volume: Int get() = maxOf(rRange, gRange, bRange)
 
         override fun compareTo(other: ColorBox): Int = other.volume.compareTo(this.volume)
 
@@ -1110,8 +1113,11 @@ object SimpleGifEncoder {
     }
 
     private fun generatePalette(frames: List<Bitmap>, maxColors: Int = 256): IntArray {
-        val samples = ArrayList<Int>(20000)
-        val step = 8
+        val totalPixels = frames.sumOf { it.width * it.height }
+        val targetSamples = 40000
+        val step = maxOf(1, totalPixels / targetSamples)
+        val samples = ArrayList<Int>(minOf(totalPixels, targetSamples + 5000))
+
         for (frame in frames) {
             val w = frame.width
             val h = frame.height
@@ -1139,13 +1145,9 @@ object SimpleGifEncoder {
                 break
             }
 
-            val rRange = box.maxR - box.minR
-            val gRange = box.maxG - box.minG
-            val bRange = box.maxB - box.minB
-
             val channel = when {
-                rRange >= gRange && rRange >= bRange -> 0
-                gRange >= rRange && gRange >= bRange -> 1
+                box.gRange >= box.rRange && box.gRange >= box.bRange -> 1
+                box.rRange >= box.bRange -> 0
                 else -> 2
             }
 
@@ -1197,17 +1199,17 @@ object SimpleGifEncoder {
     }
 
     private fun buildLookupTable(palette: IntArray): ByteArray {
-        val lut = ByteArray(32768)
+        val lut = ByteArray(65536)
         val palR = IntArray(256) { (palette[it] shr 16) and 0xFF }
         val palG = IntArray(256) { (palette[it] shr 8) and 0xFF }
         val palB = IntArray(256) { palette[it] and 0xFF }
 
         for (r5 in 0 until 32) {
-            val r = (r5 * 255) / 31
-            for (g5 in 0 until 32) {
-                val g = (g5 * 255) / 31
+            val r = (r5 * 255 + 15) / 31
+            for (g6 in 0 until 64) {
+                val g = (g6 * 255 + 31) / 63
                 for (b5 in 0 until 32) {
-                    val b = (b5 * 255) / 31
+                    val b = (b5 * 255 + 15) / 31
                     var bestIdx = 0
                     var bestDist = Long.MAX_VALUE
                     for (i in 0 until 256) {
@@ -1220,7 +1222,7 @@ object SimpleGifEncoder {
                             bestIdx = i
                         }
                     }
-                    val lutIndex = (r5 shl 10) or (g5 shl 5) or b5
+                    val lutIndex = (r5 shl 11) or (g6 shl 5) or b5
                     lut[lutIndex] = bestIdx.toByte()
                 }
             }
@@ -1251,44 +1253,97 @@ object SimpleGifEncoder {
             nextErrG.fill(0)
             nextErrB.fill(0)
 
-            for (x in 0 until w) {
-                val c = argb[y * w + x]
-                val origR = (c shr 16) and 0xFF
-                val origG = (c shr 8) and 0xFF
-                val origB = c and 0xFF
+            if (y % 2 == 0) {
+                // Left-to-right scan
+                for (x in 0 until w) {
+                    val c = argb[y * w + x]
+                    val origR = (c shr 16) and 0xFF
+                    val origG = (c shr 8) and 0xFF
+                    val origB = c and 0xFF
 
-                val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
-                val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
-                val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
+                    val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
+                    val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
+                    val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
 
-                val r5 = (r shr 3).coerceIn(0, 31)
-                val g5 = (g shr 3).coerceIn(0, 31)
-                val b5 = (b shr 3).coerceIn(0, 31)
-                val lutIdx = (r5 shl 10) or (g5 shl 5) or b5
-                val colorIdx = lut[lutIdx].toInt() and 0xFF
+                    val r5 = (r * 31 + 127) / 255
+                    val g6 = (g * 63 + 127) / 255
+                    val b5 = (b * 31 + 127) / 255
+                    val lutIdx = (r5 shl 11) or (g6 shl 5) or b5
+                    val colorIdx = lut[lutIdx].toInt() and 0xFF
 
-                indexed[y * w + x] = colorIdx.toByte()
+                    indexed[y * w + x] = colorIdx.toByte()
 
-                val palCol = palette[colorIdx]
-                val errR = r - ((palCol shr 16) and 0xFF)
-                val errG = g - ((palCol shr 8) and 0xFF)
-                val errB = b - (palCol and 0xFF)
+                    val palCol = palette[colorIdx]
+                    val rawErrR = r - ((palCol shr 16) and 0xFF)
+                    val rawErrG = g - ((palCol shr 8) and 0xFF)
+                    val rawErrB = b - (palCol and 0xFF)
 
-                currErrR[x + 2] += (errR * 7) shr 4
-                currErrG[x + 2] += (errG * 7) shr 4
-                currErrB[x + 2] += (errB * 7) shr 4
+                    // Error attenuation & clamp to eliminate noisy speckles / bad pixels
+                    val errR = ((rawErrR * 4) / 5).coerceIn(-18, 18)
+                    val errG = ((rawErrG * 4) / 5).coerceIn(-18, 18)
+                    val errB = ((rawErrB * 4) / 5).coerceIn(-18, 18)
 
-                nextErrR[x] += (errR * 3) shr 4
-                nextErrG[x] += (errG * 3) shr 4
-                nextErrB[x] += (errB * 3) shr 4
+                    currErrR[x + 2] += (errR * 7) shr 4
+                    currErrG[x + 2] += (errG * 7) shr 4
+                    currErrB[x + 2] += (errB * 7) shr 4
 
-                nextErrR[x + 1] += (errR * 5) shr 4
-                nextErrG[x + 1] += (errG * 5) shr 4
-                nextErrB[x + 1] += (errB * 5) shr 4
+                    nextErrR[x] += (errR * 3) shr 4
+                    nextErrG[x] += (errG * 3) shr 4
+                    nextErrB[x] += (errB * 3) shr 4
 
-                nextErrR[x + 2] += (errR * 1) shr 4
-                nextErrG[x + 2] += (errG * 1) shr 4
-                nextErrB[x + 2] += (errB * 1) shr 4
+                    nextErrR[x + 1] += (errR * 5) shr 4
+                    nextErrG[x + 1] += (errG * 5) shr 4
+                    nextErrB[x + 1] += (errB * 5) shr 4
+
+                    nextErrR[x + 2] += (errR * 1) shr 4
+                    nextErrG[x + 2] += (errG * 1) shr 4
+                    nextErrB[x + 2] += (errB * 1) shr 4
+                }
+            } else {
+                // Right-to-left scan
+                for (x in w - 1 downTo 0) {
+                    val c = argb[y * w + x]
+                    val origR = (c shr 16) and 0xFF
+                    val origG = (c shr 8) and 0xFF
+                    val origB = c and 0xFF
+
+                    val r = (origR + currErrR[x + 1]).coerceIn(0, 255)
+                    val g = (origG + currErrG[x + 1]).coerceIn(0, 255)
+                    val b = (origB + currErrB[x + 1]).coerceIn(0, 255)
+
+                    val r5 = (r * 31 + 127) / 255
+                    val g6 = (g * 63 + 127) / 255
+                    val b5 = (b * 31 + 127) / 255
+                    val lutIdx = (r5 shl 11) or (g6 shl 5) or b5
+                    val colorIdx = lut[lutIdx].toInt() and 0xFF
+
+                    indexed[y * w + x] = colorIdx.toByte()
+
+                    val palCol = palette[colorIdx]
+                    val rawErrR = r - ((palCol shr 16) and 0xFF)
+                    val rawErrG = g - ((palCol shr 8) and 0xFF)
+                    val rawErrB = b - (palCol and 0xFF)
+
+                    val errR = ((rawErrR * 4) / 5).coerceIn(-18, 18)
+                    val errG = ((rawErrG * 4) / 5).coerceIn(-18, 18)
+                    val errB = ((rawErrB * 4) / 5).coerceIn(-18, 18)
+
+                    currErrR[x] += (errR * 7) shr 4
+                    currErrG[x] += (errG * 7) shr 4
+                    currErrB[x] += (errB * 7) shr 4
+
+                    nextErrR[x + 2] += (errR * 3) shr 4
+                    nextErrG[x + 2] += (errG * 3) shr 4
+                    nextErrB[x + 2] += (errB * 3) shr 4
+
+                    nextErrR[x + 1] += (errR * 5) shr 4
+                    nextErrG[x + 1] += (errG * 5) shr 4
+                    nextErrB[x + 1] += (errB * 5) shr 4
+
+                    nextErrR[x] += (errR * 1) shr 4
+                    nextErrG[x] += (errG * 1) shr 4
+                    nextErrB[x] += (errB * 1) shr 4
+                }
             }
 
             val tmpR = currErrR; currErrR = nextErrR; nextErrR = tmpR
@@ -1300,16 +1355,53 @@ object SimpleGifEncoder {
     }
 
     private fun lzwEncode(out: ByteArrayOutputStream, pixels: ByteArray) {
-        val minCodeSize = 8
-        out.write(minCodeSize)
+        val initCodeSize = 8
+        out.write(initCodeSize)
 
-        val clearCode = 1 shl minCodeSize
+        val clearCode = 1 shl initCodeSize
         val endCode = clearCode + 1
+        var codeSize = initCodeSize + 1
+        var maxCode = 1 shl codeSize
+        var nextCode = endCode + 1
+
+        val hashSize = 9973
+        val hashPrefix = IntArray(hashSize) { -1 }
+        val hashSuffix = IntArray(hashSize) { -1 }
+        val hashNext = IntArray(hashSize) { -1 }
+
+        fun clearTable() {
+            hashPrefix.fill(-1)
+            hashSuffix.fill(-1)
+            hashNext.fill(-1)
+            codeSize = initCodeSize + 1
+            maxCode = 1 shl codeSize
+            nextCode = endCode + 1
+        }
+
+        fun findInTable(prefix: Int, suffix: Int): Int {
+            var h = ((prefix shl 8) xor suffix) and 0x7FFFFFFF % hashSize
+            while (hashPrefix[h] != -1) {
+                if (hashPrefix[h] == prefix && hashSuffix[h] == suffix) {
+                    return hashNext[h]
+                }
+                h = (h + 1) % hashSize
+            }
+            return -1
+        }
+
+        fun insertInTable(prefix: Int, suffix: Int, code: Int) {
+            var h = ((prefix shl 8) xor suffix) and 0x7FFFFFFF % hashSize
+            while (hashPrefix[h] != -1) {
+                h = (h + 1) % hashSize
+            }
+            hashPrefix[h] = prefix
+            hashSuffix[h] = suffix
+            hashNext[h] = code
+        }
 
         val subBlock = ByteArrayOutputStream()
         var bitBuf = 0
         var bitCnt = 0
-        val codeSize = minCodeSize + 1
 
         fun emitCode(code: Int) {
             bitBuf = bitBuf or (code shl bitCnt)
@@ -1319,34 +1411,50 @@ object SimpleGifEncoder {
                 bitBuf = bitBuf ushr 8
                 bitCnt -= 8
                 if (subBlock.size() == 254) {
-                    val bytes = subBlock.toByteArray()
-                    out.write(bytes.size)
-                    out.write(bytes)
+                    out.write(subBlock.size())
+                    subBlock.writeTo(out)
                     subBlock.reset()
                 }
             }
         }
 
         emitCode(clearCode)
-        var countSinceClear = 0
-        for (b in pixels) {
-            emitCode(b.toInt() and 0xFF)
-            countSinceClear++
-            // Reset table before 9-bit codes overflow (at 512 - 258 = 250 entries)
-            if (countSinceClear == 248) {
-                emitCode(clearCode)
-                countSinceClear = 0
+        clearTable()
+
+        if (pixels.isNotEmpty()) {
+            var prefix = pixels[0].toInt() and 0xFF
+            for (i in 1 until pixels.size) {
+                val suffix = pixels[i].toInt() and 0xFF
+                val code = findInTable(prefix, suffix)
+                if (code != -1) {
+                    prefix = code
+                } else {
+                    emitCode(prefix)
+                    if (nextCode < 4096) {
+                        insertInTable(prefix, suffix, nextCode)
+                        if (nextCode >= maxCode && codeSize < 12) {
+                            codeSize++
+                            maxCode = 1 shl codeSize
+                        }
+                        nextCode++
+                    } else {
+                        emitCode(clearCode)
+                        clearTable()
+                    }
+                    prefix = suffix
+                }
             }
+            emitCode(prefix)
         }
+
         emitCode(endCode)
 
         if (bitCnt > 0) {
             subBlock.write(bitBuf and 0xFF)
         }
         if (subBlock.size() > 0) {
-            val bytes = subBlock.toByteArray()
-            out.write(bytes.size)
-            out.write(bytes)
+            out.write(subBlock.size())
+            subBlock.writeTo(out)
         }
         out.write(0) // Block terminator
     }
