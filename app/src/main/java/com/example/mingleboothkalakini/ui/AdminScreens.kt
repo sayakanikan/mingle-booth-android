@@ -220,102 +220,167 @@ fun AdminDashboardScreen(
             border = BorderStroke(1.dp, BorderWarm),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(RetroCardBrush)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(
-                        painter = painterResource(id = R.drawable.logo_mingle_booth),
-                        contentDescription = "Logo",
-                        modifier = Modifier
-                            .height(44.dp)
-                            .widthIn(max = 80.dp),
-                        contentScale = ContentScale.Fit
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            "Mingle Booth Studio",
-                            style = TextStyle(
-                                brush = RetroTitleBrush,
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 18.sp
-                            )
-                        )
-                        Text(
-                            text = "LIVE EVENT • ${settings.eventTitle.uppercase()}",
-                            color = SageGreen,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val isCompact = maxWidth < 600.dp
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = onReconnectDb,
-                        enabled = !isBusy,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(
-                            1.dp,
-                            if (dbError != null) Color(0xFFDC2626).copy(alpha = 0.6f) else BorderWarm
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(RetroCardBrush)
+                        .padding(
+                            horizontal = if (isCompact) 10.dp else 16.dp,
+                            vertical = if (isCompact) 8.dp else 10.dp
                         ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (dbError != null) Color(0xFFDC2626) else Espresso
-                        )
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
                     ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Reconnect DB",
-                            modifier = Modifier.size(15.dp)
+                        Image(
+                            painter = painterResource(id = R.drawable.logo_mingle_booth),
+                            contentDescription = "Logo",
+                            modifier = Modifier
+                                .height(if (isCompact) 32.dp else 44.dp)
+                                .widthIn(max = if (isCompact) 60.dp else 80.dp),
+                            contentScale = ContentScale.Fit
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            if (dbError != null) "Reconnect DB" else "Sync",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .shadow(4.dp, RoundedCornerShape(50), spotColor = Terracotta)
-                            .clip(RoundedCornerShape(50))
-                            .background(RetroButtonBrush)
-                            .clickable { onReturnToBooth() }
-                            .padding(horizontal = 16.dp, vertical = 9.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(if (isCompact) 6.dp else 10.dp))
+                        Column {
                             Text(
-                                "LAUNCH BOOTH",
-                                color = Color.White,
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.sp
+                                if (isCompact) "Studio Admin" else "Mingle Booth Studio",
+                                style = TextStyle(
+                                    brush = RetroTitleBrush,
+                                    fontFamily = FontFamily.Serif,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = if (isCompact) 15.sp else 18.sp
+                                ),
+                                maxLines = 1
                             )
+                            if (!isCompact) {
+                                Text(
+                                    text = "LIVE EVENT • ${settings.eventTitle.uppercase()}",
+                                    color = SageGreen,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    letterSpacing = 1.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = onLogout,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, BorderWarm),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MutedCocoa)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Logout", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        if (isCompact) {
+                            FilledTonalIconButton(
+                                onClick = onReconnectDb,
+                                enabled = !isBusy,
+                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = if (dbError != null) Color(0xFFFEE2E2) else SoftPeach,
+                                    contentColor = if (dbError != null) Color(0xFFDC2626) else Espresso
+                                ),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Sync DB", modifier = Modifier.size(18.dp))
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .shadow(4.dp, RoundedCornerShape(50), spotColor = Terracotta)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(RetroButtonBrush)
+                                    .clickable { onReturnToBooth() }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "BOOTH",
+                                        color = Color.White,
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+                            }
+
+                            FilledTonalIconButton(
+                                onClick = onLogout,
+                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = SurfaceSand,
+                                    contentColor = MutedCocoa
+                                ),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(Icons.Default.ExitToApp, contentDescription = "Logout", modifier = Modifier.size(18.dp))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = onReconnectDb,
+                                enabled = !isBusy,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (dbError != null) Color(0xFFDC2626).copy(alpha = 0.6f) else BorderWarm
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = if (dbError != null) Color(0xFFDC2626) else Espresso
+                                )
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Reconnect DB",
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    if (dbError != null) "Reconnect DB" else "Sync",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .shadow(4.dp, RoundedCornerShape(50), spotColor = Terracotta)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(RetroButtonBrush)
+                                    .clickable { onReturnToBooth() }
+                                    .padding(horizontal = 16.dp, vertical = 9.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "LAUNCH BOOTH",
+                                        color = Color.White,
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = onLogout,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, BorderWarm),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MutedCocoa)
+                            ) {
+                                Text("Logout", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             }
@@ -762,126 +827,261 @@ private fun EventsAndFramesTab(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
+                        BoxWithConstraints(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(14.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                            val isCompact = maxWidth < 600.dp
+                            if (isCompact) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = ev.title,
+                                            color = Espresso,
+                                            fontFamily = FontFamily.Serif,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (ev.isActive) {
+                                            Spacer(Modifier.width(8.dp))
+                                            Surface(
+                                                color = SageGreen.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(50),
+                                                border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+                                            ) {
+                                                Text(
+                                                    text = "ACTIVE",
+                                                    color = SageGreen,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                     Text(
-                                        text = ev.title,
-                                        color = Espresso,
-                                        fontFamily = FontFamily.Serif,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
+                                        text = "${ev.subtitle} · ${ev.sessionCount} sessions",
+                                        color = MutedCocoa,
+                                        fontSize = 12.sp
                                     )
-                                    if (ev.isActive) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Surface(
-                                            color = SageGreen.copy(alpha = 0.15f),
-                                            shape = RoundedCornerShape(50),
-                                            border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (!ev.isActive) {
+                                            FilledTonalButton(
+                                                onClick = { onActivateEvent(ev.id) },
+                                                enabled = !isBusy,
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = SoftPeach,
+                                                    contentColor = Espresso
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text("Activate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventToEdit = ev },
+                                            enabled = !isBusy
                                         ) {
-                                            Text(
-                                                text = "ACTIVE",
-                                                color = SageGreen,
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Event", tint = Terracotta)
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventForQrDialog = ev },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.QrCode, contentDescription = "Show All Photos Barcode / QR", tint = Terracotta)
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
+                                                Toast.makeText(context, "Copied link for all photos: ${ev.galleryUrl}", Toast.LENGTH_SHORT).show()
+                                            },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link for All Photos", tint = Espresso)
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
+                                                context.startActivity(intent)
+                                            },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { onOpenEventGallery(ev.id) },
+                                            border = BorderStroke(1.dp, BorderWarm),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("Photos", fontSize = 11.sp)
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventToRegenerateAll = ev },
+                                            enabled = !isBusy && !batchProgress.isRunning
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Sync,
+                                                contentDescription = "Regenerate All Photos in Event",
+                                                tint = if (batchProgress.isRunning && batchProgress.eventId == ev.id) Terracotta else Espresso
                                             )
+                                        }
+
+                                        if (ev.id != "default") {
+                                            IconButton(
+                                                onClick = { onDeleteEvent(ev.id) },
+                                                enabled = !isBusy
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Event", tint = Color(0xFFDC2626))
+                                            }
                                         }
                                     }
                                 }
-                                Text(
-                                    text = "${ev.subtitle} · ${ev.sessionCount} sessions",
-                                    color = MutedCocoa,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (!ev.isActive) {
-                                    FilledTonalButton(
-                                        onClick = { onActivateEvent(ev.id) },
-                                        enabled = !isBusy,
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = SoftPeach,
-                                            contentColor = Espresso
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Activate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = ev.title,
+                                                color = Espresso,
+                                                fontFamily = FontFamily.Serif,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp
+                                            )
+                                            if (ev.isActive) {
+                                                Spacer(Modifier.width(8.dp))
+                                                Surface(
+                                                    color = SageGreen.copy(alpha = 0.15f),
+                                                    shape = RoundedCornerShape(50),
+                                                    border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+                                                ) {
+                                                    Text(
+                                                        text = "ACTIVE",
+                                                        color = SageGreen,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = "${ev.subtitle} · ${ev.sessionCount} sessions",
+                                            color = MutedCocoa,
+                                            fontSize = 12.sp
+                                        )
                                     }
-                                }
 
-                                IconButton(
-                                    onClick = { eventToEdit = ev },
-                                    enabled = !isBusy
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit Event", tint = Terracotta)
-                                }
-
-                                IconButton(
-                                    onClick = { eventForQrDialog = ev },
-                                    enabled = !isBusy
-                                ) {
-                                    Icon(Icons.Default.QrCode, contentDescription = "Show All Photos Barcode / QR", tint = Terracotta)
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
-                                        Toast.makeText(context, "Copied link for all photos: ${ev.galleryUrl}", Toast.LENGTH_SHORT).show()
-                                    },
-                                    enabled = !isBusy
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link for All Photos", tint = Espresso)
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
-                                        context.startActivity(intent)
-                                    },
-                                    enabled = !isBusy
-                                ) {
-                                    Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { onOpenEventGallery(ev.id) },
-                                    border = BorderStroke(1.dp, BorderWarm),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Text("Photos", fontSize = 11.sp)
-                                }
-
-                                IconButton(
-                                    onClick = { eventToRegenerateAll = ev },
-                                    enabled = !isBusy && !batchProgress.isRunning
-                                ) {
-                                    Icon(
-                                        Icons.Default.Sync,
-                                        contentDescription = "Regenerate All Photos in Event",
-                                        tint = if (batchProgress.isRunning && batchProgress.eventId == ev.id) Terracotta else Espresso
-                                    )
-                                }
-
-                                if (ev.id != "default") {
-                                    IconButton(
-                                        onClick = { onDeleteEvent(ev.id) },
-                                        enabled = !isBusy
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete Event", tint = Color(0xFFDC2626))
+                                        if (!ev.isActive) {
+                                            FilledTonalButton(
+                                                onClick = { onActivateEvent(ev.id) },
+                                                enabled = !isBusy,
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = SoftPeach,
+                                                    contentColor = Espresso
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text("Activate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventToEdit = ev },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Event", tint = Terracotta)
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventForQrDialog = ev },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.QrCode, contentDescription = "Show All Photos Barcode / QR", tint = Terracotta)
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("Event Photos Link", ev.galleryUrl))
+                                                Toast.makeText(context, "Copied link for all photos: ${ev.galleryUrl}", Toast.LENGTH_SHORT).show()
+                                            },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link for All Photos", tint = Espresso)
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(ev.galleryUrl))
+                                                context.startActivity(intent)
+                                            },
+                                            enabled = !isBusy
+                                        ) {
+                                            Icon(Icons.Default.OpenInNew, contentDescription = "Open Web Gallery", tint = Espresso)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { onOpenEventGallery(ev.id) },
+                                            border = BorderStroke(1.dp, BorderWarm),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("Photos", fontSize = 11.sp)
+                                        }
+
+                                        IconButton(
+                                            onClick = { eventToRegenerateAll = ev },
+                                            enabled = !isBusy && !batchProgress.isRunning
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Sync,
+                                                contentDescription = "Regenerate All Photos in Event",
+                                                tint = if (batchProgress.isRunning && batchProgress.eventId == ev.id) Terracotta else Espresso
+                                            )
+                                        }
+
+                                        if (ev.id != "default") {
+                                            IconButton(
+                                                onClick = { onDeleteEvent(ev.id) },
+                                                enabled = !isBusy
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Event", tint = Color(0xFFDC2626))
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1580,90 +1780,186 @@ private fun FrameRowCard(
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(12.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(CardCream)
-                        .border(1.dp, BorderWarm, RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
+            val isCompact = maxWidth < 550.dp
+            if (isCompact) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    AsyncImage(
-                        model = frame.dataUrl,
-                        contentDescription = frame.name,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(frame.name, color = Espresso, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text(
-                        "${frame.slots.size} EXP · ${frame.width}×${frame.height}PX",
-                        color = MutedCocoa,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                    )
-                }
-            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(CardCream)
+                                .border(1.dp, BorderWarm, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = frame.dataUrl,
+                                contentDescription = frame.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(frame.name, color = Espresso, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(
+                                "${frame.slots.size} EXP · ${frame.width}×${frame.height}PX",
+                                color = MutedCocoa,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        }
+                        if (isActive) {
+                            Surface(
+                                color = SageGreen.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "✓ ACTIVE",
+                                    color = SageGreen,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onEditSlots,
-                    enabled = !isBusy,
-                    border = BorderStroke(1.dp, BorderWarm),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
-                    shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = onEditSlots,
+                            enabled = !isBusy,
+                            border = BorderStroke(1.dp, BorderWarm),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Icon(Icons.Default.GridOn, contentDescription = null, modifier = Modifier.size(13.dp), tint = Terracotta)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit Slots", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (!isActive) {
+                            Spacer(Modifier.width(6.dp))
+                            Button(
+                                onClick = onActivate,
+                                enabled = !isBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)
+                            ) {
+                                Text("Use Frame", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(onClick = onDelete, enabled = !isBusy) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Frame", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.GridOn, contentDescription = null, modifier = Modifier.size(14.dp), tint = Terracotta)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Edit Slots", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-
-                if (isActive) {
-                    Surface(
-                        color = SageGreen.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text(
-                            text = "✓ ACTIVE",
-                            color = SageGreen,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(CardCream)
+                                .border(1.dp, BorderWarm, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = frame.dataUrl,
+                                contentDescription = frame.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(frame.name, color = Espresso, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text(
+                                "${frame.slots.size} EXP · ${frame.width}×${frame.height}PX",
+                                color = MutedCocoa,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
-                } else {
-                    Button(
-                        onClick = onActivate,
-                        enabled = !isBusy,
-                        colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
-                        shape = RoundedCornerShape(50),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                    ) {
-                        Text("Use Frame", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
 
-                IconButton(onClick = onDelete, enabled = !isBusy) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete Frame", tint = Color(0xFFDC2626))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onEditSlots,
+                            enabled = !isBusy,
+                            border = BorderStroke(1.dp, BorderWarm),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Espresso),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.GridOn, contentDescription = null, modifier = Modifier.size(14.dp), tint = Terracotta)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit Slots", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (isActive) {
+                            Surface(
+                                color = SageGreen.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, SageGreen.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "✓ ACTIVE",
+                                    color = SageGreen,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = onActivate,
+                                enabled = !isBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Terracotta, contentColor = Color.White),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text("Use Frame", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        IconButton(onClick = onDelete, enabled = !isBusy) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Frame", tint = Color(0xFFDC2626))
+                        }
+                    }
                 }
             }
         }

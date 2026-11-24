@@ -168,18 +168,20 @@ fun ScreenSaverView(
     val hasActiveEvent = settings.hasActiveEvent
     val hasActiveSlots = (settings.activeFrame?.slots?.size ?: 0) > 0
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(RetroCanvasBrush)
             .clickable(enabled = !isLoading) { onStart() }
     ) {
+        val isCompact = maxWidth < 600.dp
+
         // Ambient Color Gradation Glow Orbs in Background
         Box(
             modifier = Modifier
-                .size(460.dp)
+                .size(if (isCompact) 320.dp else 460.dp)
                 .align(Alignment.TopStart)
-                .offset(x = (-120).dp, y = (-100).dp)
+                .offset(x = (-100).dp, y = (-80).dp)
                 .background(
                     Brush.radialGradient(
                         colors = listOf(Terracotta.copy(alpha = glowAlpha), Color.Transparent)
@@ -189,9 +191,9 @@ fun ScreenSaverView(
         )
         Box(
             modifier = Modifier
-                .size(520.dp)
+                .size(if (isCompact) 360.dp else 520.dp)
                 .align(Alignment.BottomEnd)
-                .offset(x = 140.dp, y = 140.dp)
+                .offset(x = 100.dp, y = 100.dp)
                 .background(
                     Brush.radialGradient(
                         colors = listOf(SunsetCoral.copy(alpha = glowAlpha), Color.Transparent)
@@ -203,53 +205,69 @@ fun ScreenSaverView(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp)
+                .padding(if (isCompact) 16.dp else 24.dp)
         ) {
             // Top Right Admin & Refresh Controls
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 FilledTonalIconButton(
                     onClick = onRefresh,
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = CardCream.copy(alpha = 0.85f),
                         contentColor = Espresso
-                    )
+                    ),
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Terracotta)
                 }
 
-                OutlinedButton(
-                    onClick = onOpenAdmin,
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = CardCream.copy(alpha = 0.85f),
-                        contentColor = Espresso
-                    ),
-                    border = BorderStroke(1.dp, BorderWarm),
-                    shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Icon(Icons.Default.Settings, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "STUDIO ADMIN",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
+                if (isCompact) {
+                    FilledTonalIconButton(
+                        onClick = onOpenAdmin,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = CardCream.copy(alpha = 0.85f),
+                            contentColor = Espresso
+                        ),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Studio Admin", tint = Terracotta)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenAdmin,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = CardCream.copy(alpha = 0.85f),
+                            contentColor = Espresso
+                        ),
+                        border = BorderStroke(1.dp, BorderWarm),
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "STUDIO ADMIN",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
             }
 
-            // Center Hero Retro-Editorial Branding
+            // Center Hero Retro-Editorial Branding (with vertical scroll safety on compact displays)
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .widthIn(max = 680.dp),
+                    .widthIn(max = 680.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Retro Logo Centerpiece with Soft Radial Aura
@@ -261,7 +279,7 @@ fun ScreenSaverView(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(220.dp)
+                            .size(if (isCompact) 160.dp else 220.dp)
                             .background(
                                 Brush.radialGradient(
                                     colors = listOf(
@@ -278,8 +296,8 @@ fun ScreenSaverView(
                             model = settings.brandLogoUrl,
                             contentDescription = "Brand Logo",
                             modifier = Modifier
-                                .heightIn(max = 175.dp)
-                                .widthIn(max = 290.dp),
+                                .heightIn(max = if (isCompact) 120.dp else 175.dp)
+                                .widthIn(max = if (isCompact) 210.dp else 290.dp),
                             contentScale = ContentScale.Fit
                         )
                     } else {
@@ -287,8 +305,8 @@ fun ScreenSaverView(
                             painter = painterResource(id = R.drawable.logo_mingle_booth),
                             contentDescription = "Mingle Booth Retro Logo",
                             modifier = Modifier
-                                .widthIn(max = 300.dp)
-                                .height(185.dp),
+                                .widthIn(max = if (isCompact) 220.dp else 300.dp)
+                                .height(if (isCompact) 130.dp else 185.dp),
                             contentScale = ContentScale.Fit
                         )
                     }
@@ -303,8 +321,8 @@ fun ScreenSaverView(
                         brush = RetroTitleBrush,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Black,
-                        fontSize = 44.sp,
-                        lineHeight = 50.sp,
+                        fontSize = if (isCompact) 28.sp else 44.sp,
+                        lineHeight = if (isCompact) 34.sp else 50.sp,
                         textAlign = TextAlign.Center
                     )
                 )
@@ -320,16 +338,19 @@ fun ScreenSaverView(
                     Text(
                         text = settings.eventSubtitle.ifBlank { "BY KALA KINI" }.uppercase(),
                         fontFamily = FontFamily.SansSerif,
-                        fontSize = 12.sp,
-                        letterSpacing = 3.5.sp,
+                        fontSize = if (isCompact) 10.sp else 12.sp,
+                        letterSpacing = if (isCompact) 2.sp else 3.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = DeepVermilion,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp)
+                        modifier = Modifier.padding(
+                            horizontal = if (isCompact) 14.dp else 18.dp,
+                            vertical = if (isCompact) 4.dp else 5.dp
+                        )
                     )
                 }
 
-                Spacer(Modifier.height(30.dp))
+                Spacer(Modifier.height(if (isCompact) 20.dp else 30.dp))
 
                 if (isLoading) {
                     CircularProgressIndicator(color = Terracotta, modifier = Modifier.size(36.dp))
@@ -353,11 +374,14 @@ fun ScreenSaverView(
                             .clip(RoundedCornerShape(50))
                             .background(RetroButtonBrush)
                             .border(2.dp, Color.White.copy(alpha = 0.55f), RoundedCornerShape(50))
-                            .padding(horizontal = 36.dp, vertical = 17.dp)
+                            .padding(
+                                horizontal = if (isCompact) 22.dp else 36.dp,
+                                vertical = if (isCompact) 14.dp else 17.dp
+                            )
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(if (isCompact) 8.dp else 12.dp)
                         ) {
                             Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.White)
                             Text(
@@ -365,8 +389,8 @@ fun ScreenSaverView(
                                 fontFamily = FontFamily.SansSerif,
                                 color = Color.White,
                                 fontWeight = FontWeight.Black,
-                                letterSpacing = 2.sp,
-                                fontSize = 15.sp
+                                letterSpacing = if (isCompact) 1.sp else 2.sp,
+                                fontSize = if (isCompact) 13.sp else 15.sp
                             )
                             Text("✦", color = Color.White, fontSize = 16.sp)
                         }
@@ -374,7 +398,7 @@ fun ScreenSaverView(
                 }
 
                 if (!isLoading && (!hasActiveEvent || !hasActiveSlots)) {
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(16.dp))
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = WarmGold.copy(alpha = 0.14f),
@@ -388,9 +412,9 @@ fun ScreenSaverView(
                                 "⚠️ No active frame with photo slots · Tap to configure in Admin"
                             },
                             color = Espresso,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -407,13 +431,17 @@ fun ScreenSaverView(
                         .navigationBarsPadding()
                 ) {
                     Text(
-                        text = "[ FRAME: ${settings.activeFrame.name.uppercase()} • ${settings.activeFrame.slots.size} EXP ]",
+                        text = if (isCompact) {
+                            "[ ${settings.activeFrame.name.uppercase()} • ${settings.activeFrame.slots.size} EXP ]"
+                        } else {
+                            "[ FRAME: ${settings.activeFrame.name.uppercase()} • ${settings.activeFrame.slots.size} EXP ]"
+                        },
                         color = MutedCocoa,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
+                        fontSize = if (isCompact) 10.sp else 11.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp)
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
                     )
                 }
             }
@@ -795,6 +823,7 @@ fun CaptureView(
             .background(Color.Black)
     ) {
         val isLandscape = maxWidth > maxHeight
+        val isCompact = maxWidth < 600.dp
 
         // 1. Full-Width Live Camera Preview Viewport (External USB [HDMI or Sony] OR CameraX)
         if (isExternalUsb) {
@@ -850,9 +879,9 @@ fun CaptureView(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(16.dp),
+                .padding(if (isCompact) 10.dp else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Surface(
                 color = CardCream.copy(alpha = 0.90f),
@@ -860,16 +889,24 @@ fun CaptureView(
                 shadowElevation = 6.dp,
                 border = BorderStroke(1.dp, BorderWarm),
                 modifier = Modifier
-                    .defaultMinSize(minHeight = 48.dp)
+                    .defaultMinSize(minHeight = 44.dp)
                     .clickable { onCancel() }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(
+                        horizontal = if (isCompact) 12.dp else 16.dp,
+                        vertical = if (isCompact) 10.dp else 12.dp
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Espresso, modifier = Modifier.size(16.dp))
-                    Text(if (isRetake) "Cancel Retake" else "Exit", color = Espresso, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (isRetake) (if (isCompact) "Cancel" else "Cancel Retake") else "Exit",
+                        color = Espresso,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -880,13 +917,19 @@ fun CaptureView(
                 border = BorderStroke(1.dp, BorderWarm)
             ) {
                 Text(
-                    text = if (activeSlot != null) "FILM • ${BoothUtils.formatAspectRatio(activeSlot.w, activeSlot.h)}" else "LIVE PREVIEW",
+                    text = if (activeSlot != null) {
+                        if (isCompact) BoothUtils.formatAspectRatio(activeSlot.w, activeSlot.h)
+                        else "FILM • ${BoothUtils.formatAspectRatio(activeSlot.w, activeSlot.h)}"
+                    } else "LIVE PREVIEW",
                     color = Espresso,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontSize = if (isCompact) 10.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(
+                        horizontal = if (isCompact) 10.dp else 14.dp,
+                        vertical = if (isCompact) 6.dp else 8.dp
+                    )
                 )
             }
         }
@@ -894,6 +937,7 @@ fun CaptureView(
         // 5. Small Overlay Preview for Captured Photos / Slots (Top-Right)
         SmallSlotTrackerOverlay(
             isLandscape = isLandscape,
+            isCompact = isCompact,
             currentShot = currentShot,
             totalShots = totalShots,
             isRetake = isRetake,
@@ -902,7 +946,7 @@ fun CaptureView(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(16.dp)
+                .padding(if (isCompact) 10.dp else 16.dp)
         )
 
         // 6. Tactile Camera Shutter Prompt Pill (Bottom Center)
@@ -915,16 +959,19 @@ fun CaptureView(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 24.dp)
-                .defaultMinSize(minHeight = 48.dp)
+                .padding(bottom = if (isCompact) 16.dp else 24.dp)
+                .defaultMinSize(minHeight = 44.dp)
                 .clickable(enabled = !isCapturingNow && (!isExternalUsb || isHdmiActive)) {
                     triggerSnap()
                 }
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
+                modifier = Modifier.padding(
+                    horizontal = if (isCompact) 16.dp else 24.dp,
+                    vertical = if (isCompact) 11.dp else 14.dp
+                ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (isCapturingNow) {
                     CircularProgressIndicator(
@@ -938,28 +985,41 @@ fun CaptureView(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.2.sp,
-                        fontSize = 13.sp
+                        fontSize = if (isCompact) 11.sp else 13.sp
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(10.dp)
+                            .size(9.dp)
                             .clip(CircleShape)
                             .background(if (showSonyShutterPrompt) (if (isSonyReady) SageGreen else Terracotta) else (if (cameraReady) SageGreen else Terracotta))
                     )
-                    Text(
-                        text = if (showSonyShutterPrompt) {
+                    val promptText = if (showSonyShutterPrompt) {
+                        if (isCompact) {
+                            if (isRetake) "PRESS SHUTTER • RETAKE 0${currentShot + 1}"
+                            else "PRESS SHUTTER • POSE 0${currentShot + 1}/0$totalShots"
+                        } else {
                             if (isRetake) "PRESS CAMERA SHUTTER TO RETAKE POSE 0${currentShot + 1}"
                             else "PRESS CAMERA SHUTTER • POSE 0${currentShot + 1} OF 0$totalShots"
+                        }
+                    } else {
+                        if (isCompact) {
+                            if (isRetake) "TAP / SHUTTER • RETAKE 0${currentShot + 1}"
+                            else "TAP / SHUTTER • POSE 0${currentShot + 1}/0$totalShots"
                         } else {
                             if (isRetake) "TRIGGER SHUTTER / TAP TO RETAKE POSE 0${currentShot + 1}"
                             else "TRIGGER SHUTTER / TAP • POSE 0${currentShot + 1} OF 0$totalShots"
-                        },
+                        }
+                    }
+                    Text(
+                        text = promptText,
                         color = Espresso,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                        fontSize = 12.sp
+                        letterSpacing = 1.sp,
+                        fontSize = if (isCompact) 11.sp else 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -975,21 +1035,21 @@ fun CaptureView(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(top = 70.dp)
+                    .padding(top = if (isCompact) 56.dp else 70.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("✦", color = Terracotta, fontSize = 15.sp)
-                    Spacer(Modifier.width(8.dp))
+                    Text("✦", color = Terracotta, fontSize = 14.sp)
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         intermissionText ?: "",
                         color = Espresso,
                         fontFamily = FontFamily.Serif,
                         fontStyle = FontStyle.Italic,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = if (isCompact) 12.sp else 14.sp
                     )
                 }
             }
@@ -1000,6 +1060,7 @@ fun CaptureView(
 @Composable
 private fun SmallSlotTrackerOverlay(
     isLandscape: Boolean,
+    isCompact: Boolean = false,
     currentShot: Int,
     totalShots: Int,
     isRetake: Boolean,
@@ -1009,45 +1070,48 @@ private fun SmallSlotTrackerOverlay(
 ) {
     Surface(
         color = CardCream.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(20.dp),
-        shadowElevation = 8.dp,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 6.dp,
         border = BorderStroke(1.5.dp, BorderWarm),
         modifier = modifier
     ) {
         if (isLandscape) {
             Column(
-                modifier = Modifier.padding(10.dp),
+                modifier = Modifier.padding(if (isCompact) 6.dp else 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp)
             ) {
                 Text(
                     text = if (isRetake) "[ RETAKE ]" else "[ 0${currentShot + 1} / 0$totalShots ]",
                     color = Terracotta,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
+                    fontSize = if (isCompact) 9.sp else 10.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 1.sp
                 )
                 thumbs.forEachIndexed { idx, bmp ->
-                    MiniSlotBox(idx = idx, isCurrent = idx == currentShot, bitmap = bmp, slotAspect = slotAspect)
+                    MiniSlotBox(idx = idx, isCurrent = idx == currentShot, bitmap = bmp, slotAspect = slotAspect, isCompact = isCompact)
                 }
             }
         } else {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(
+                    horizontal = if (isCompact) 8.dp else 12.dp,
+                    vertical = if (isCompact) 6.dp else 8.dp
+                ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 8.dp)
             ) {
                 Text(
                     text = if (isRetake) "[ RETAKE ]" else "[ 0${currentShot + 1} / 0$totalShots ]",
                     color = Terracotta,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
+                    fontSize = if (isCompact) 9.sp else 10.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 1.sp
                 )
                 thumbs.forEachIndexed { idx, bmp ->
-                    MiniSlotBox(idx = idx, isCurrent = idx == currentShot, bitmap = bmp, slotAspect = slotAspect)
+                    MiniSlotBox(idx = idx, isCurrent = idx == currentShot, bitmap = bmp, slotAspect = slotAspect, isCompact = isCompact)
                 }
             }
         }
@@ -1059,10 +1123,12 @@ private fun MiniSlotBox(
     idx: Int,
     isCurrent: Boolean,
     bitmap: Bitmap?,
-    slotAspect: Float
+    slotAspect: Float,
+    isCompact: Boolean = false
 ) {
-    val boxWidth = 52.dp
-    val boxHeight = (52f / slotAspect.coerceIn(0.6f, 1.8f)).coerceIn(38f, 66f).dp
+    val boxWidth = if (isCompact) 38.dp else 52.dp
+    val baseHeight = (if (isCompact) 38f else 52f) / slotAspect.coerceIn(0.6f, 1.8f)
+    val boxHeight = baseHeight.coerceIn(if (isCompact) 28f else 38f, if (isCompact) 50f else 66f).dp
 
     val borderColor = when {
         isCurrent -> Terracotta
@@ -1253,6 +1319,7 @@ fun ReviewView(
 
     val validIdx = selectedIdx.coerceIn(0, (photos.size - 1).coerceAtLeast(0))
     val currentPhoto = photos.getOrNull(validIdx)
+    var phoneReviewTab by remember { mutableIntStateOf(0) } // 0: Poses, 1: Analog Strip
 
     BoxWithConstraints(
         modifier = Modifier
@@ -1262,6 +1329,7 @@ fun ReviewView(
             .padding(16.dp)
     ) {
         val isLandscape = maxWidth > maxHeight
+        val isCompact = maxWidth < 600.dp
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -1269,16 +1337,65 @@ fun ReviewView(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Editorial Header
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Text(
                     text = "Review Your Poses",
                     style = TextStyle(
                         brush = RetroTitleBrush,
                         fontFamily = FontFamily.Serif,
-                        fontSize = 28.sp,
+                        fontSize = if (isCompact) 22.sp else 28.sp,
                         fontWeight = FontWeight.Black
                     )
                 )
+
+                // Phone-only segmented tab control (Poses vs Analog Strip)
+                if (isCompact && !isLandscape) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .clip(RoundedCornerShape(50))
+                            .background(SurfaceSand)
+                            .border(1.dp, BorderWarm, RoundedCornerShape(50))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { phoneReviewTab = 0 },
+                            shape = RoundedCornerShape(50),
+                            color = if (phoneReviewTab == 0) Terracotta else Color.Transparent
+                        ) {
+                            Text(
+                                "📸 Photo Poses",
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (phoneReviewTab == 0) Color.White else Espresso
+                            )
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { phoneReviewTab = 1 },
+                            shape = RoundedCornerShape(50),
+                            color = if (phoneReviewTab == 1) Terracotta else Color.Transparent
+                        ) {
+                            Text(
+                                "🎞️ Analog Strip",
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (phoneReviewTab == 1) Color.White else Espresso
+                            )
+                        }
+                    }
+                }
             }
 
             if (isLandscape) {
@@ -1287,13 +1404,14 @@ fun ReviewView(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     SelectedPhotoInspector(
                         photos = photos,
                         validIdx = validIdx,
                         currentPhoto = currentPhoto,
+                        isCompact = isCompact,
                         onSelectIdx = { selectedIdx = it },
                         onPhotoClick = { bmp ->
                             fullPreviewBitmap = bmp
@@ -1316,7 +1434,41 @@ fun ReviewView(
                             .fillMaxHeight()
                     )
                 }
+            } else if (isCompact) {
+                // Phone portrait: full-size segmented display
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                ) {
+                    if (phoneReviewTab == 0) {
+                        SelectedPhotoInspector(
+                            photos = photos,
+                            validIdx = validIdx,
+                            currentPhoto = currentPhoto,
+                            isCompact = true,
+                            onSelectIdx = { selectedIdx = it },
+                            onPhotoClick = { bmp ->
+                                fullPreviewBitmap = bmp
+                                fullPreviewTitle = "[ POSE 0${validIdx + 1} OF 0${photos.size} • FULL VIEW ]"
+                            },
+                            onRetakeSlot = onRetakeSlot,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        StripPreviewCard(
+                            stripBitmap = stripPreview,
+                            onStripClick = { bmp ->
+                                fullPreviewBitmap = bmp
+                                fullPreviewTitle = "[ ANALOG STRIP • FULL PREVIEW ]"
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
             } else {
+                // Tablet portrait: side-by-side / stacked dual preview
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -1329,6 +1481,7 @@ fun ReviewView(
                         photos = photos,
                         validIdx = validIdx,
                         currentPhoto = currentPhoto,
+                        isCompact = false,
                         onSelectIdx = { selectedIdx = it },
                         onPhotoClick = { bmp ->
                             fullPreviewBitmap = bmp
@@ -1355,41 +1508,48 @@ fun ReviewView(
 
             // Action Buttons with Gradient Primary CTA
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = if (isCompact) Modifier.fillMaxWidth() else Modifier,
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 10.dp else 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    modifier = Modifier
+                    modifier = (if (isCompact) Modifier.weight(1.3f) else Modifier)
                         .shadow(6.dp, RoundedCornerShape(50), spotColor = Terracotta)
                         .clip(RoundedCornerShape(50))
                         .background(RetroButtonBrush)
                         .defaultMinSize(minHeight = 48.dp)
                         .clickable { onConfirm() }
-                        .padding(horizontal = 28.dp, vertical = 14.dp),
+                        .padding(horizontal = if (isCompact) 16.dp else 28.dp, vertical = if (isCompact) 13.dp else 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "TAKE THE PHOTOS!",
+                        if (isCompact) "CONFIRM PHOTOS ✦" else "TAKE THE PHOTOS!",
                         color = Color.White,
                         fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.5.sp,
-                        fontSize = 13.sp
+                        letterSpacing = 1.2.sp,
+                        fontSize = if (isCompact) 12.sp else 13.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
 
                 OutlinedButton(
                     onClick = onRestartAll,
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                    modifier = (if (isCompact) Modifier.weight(0.9f) else Modifier).defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(1.5.dp, BorderWarm),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = CardCream.copy(alpha = 0.8f),
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp)
+                    contentPadding = PaddingValues(horizontal = if (isCompact) 10.dp else 20.dp, vertical = if (isCompact) 13.dp else 14.dp)
                 ) {
-                    Text("Retake All ↺", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(
+                        "Retake All ↺",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isCompact) 12.sp else 13.sp,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
@@ -1410,6 +1570,7 @@ private fun SelectedPhotoInspector(
     photos: List<Bitmap>,
     validIdx: Int,
     currentPhoto: Bitmap?,
+    isCompact: Boolean = false,
     onSelectIdx: (Int) -> Unit,
     onPhotoClick: (Bitmap) -> Unit,
     onRetakeSlot: (Int) -> Unit,
@@ -1426,7 +1587,7 @@ private fun SelectedPhotoInspector(
             modifier = Modifier
                 .fillMaxSize()
                 .background(RetroCardBrush)
-                .padding(14.dp),
+                .padding(if (isCompact) 10.dp else 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -1441,22 +1602,26 @@ private fun SelectedPhotoInspector(
                     text = "[ FRAME 0${validIdx + 1} OF 0${photos.size} ]",
                     color = Espresso,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
+                    fontSize = if (isCompact) 11.sp else 13.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
 
                 FilledTonalButton(
                     onClick = { onRetakeSlot(validIdx) },
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                    modifier = Modifier.defaultMinSize(minHeight = 44.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = DeepVermilion
                     ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                    contentPadding = PaddingValues(horizontal = if (isCompact) 10.dp else 16.dp, vertical = 8.dp)
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Retake Pose ${validIdx + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (isCompact) "Retake ↺" else "Retake Pose ${validIdx + 1}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -1708,47 +1873,50 @@ fun ProcessingView(
         "📱 Generating instant QR download link"
     )
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(RetroCanvasBrush)
-            .padding(24.dp),
+            .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
+        val isCompact = maxWidth < 600.dp
         Card(
             colors = CardDefaults.cardColors(containerColor = CardCream),
-            shape = RoundedCornerShape(30.dp),
+            shape = RoundedCornerShape(26.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
             border = BorderStroke(1.5.dp, BorderWarm),
-            modifier = Modifier.widthIn(max = 460.dp)
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Column(
                 modifier = Modifier
                     .background(RetroCardBrush)
-                    .padding(28.dp),
+                    .padding(if (isCompact) 20.dp else 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.logo_mingle_booth),
                     contentDescription = "Mingle Booth",
                     modifier = Modifier
-                        .height(100.dp)
-                        .widthIn(max = 180.dp),
+                        .height(if (isCompact) 65.dp else 100.dp)
+                        .widthIn(max = if (isCompact) 140.dp else 180.dp),
                     contentScale = ContentScale.Fit
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 CircularProgressIndicator(
                     color = Terracotta,
                     strokeWidth = 3.dp,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(if (isCompact) 30.dp else 36.dp)
                 )
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     text = "Developing in the Darkroom…",
                     style = TextStyle(
                         brush = RetroTitleBrush,
                         fontFamily = FontFamily.Serif,
-                        fontSize = 24.sp,
+                        fontSize = if (isCompact) 20.sp else 24.sp,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center
                     )
@@ -1759,12 +1927,12 @@ fun ProcessingView(
                     color = MutedCocoa,
                     fontFamily = FontFamily.Serif,
                     fontStyle = FontStyle.Italic,
-                    fontSize = 14.sp,
+                    fontSize = if (isCompact) 12.sp else 14.sp,
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(if (isCompact) 16.dp else 22.dp))
 
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(if (isCompact) 8.dp else 10.dp)) {
                     steps.forEachIndexed { idx, label ->
                         val isDone = idx < stage
                         val isCurrent = idx == stage
@@ -1786,22 +1954,27 @@ fun ProcessingView(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                modifier = Modifier.padding(
+                                    horizontal = if (isCompact) 12.dp else 14.dp,
+                                    vertical = if (isCompact) 10.dp else 12.dp
+                                ),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = label,
                                     color = if (isDone || isCurrent) Espresso else MutedCocoa,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isDone || isCurrent) FontWeight.Bold else FontWeight.Normal
+                                    fontSize = if (isCompact) 11.sp else 13.sp,
+                                    fontWeight = if (isDone || isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                Spacer(Modifier.width(8.dp))
                                 if (isDone) {
                                     Text(
                                         "DONE ✓",
                                         color = SageGreen,
                                         fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
+                                        fontSize = if (isCompact) 10.sp else 11.sp,
                                         fontWeight = FontWeight.ExtraBold
                                     )
                                 } else if (isCurrent) {
@@ -1809,7 +1982,7 @@ fun ProcessingView(
                                         "ACTIVE…",
                                         color = Terracotta,
                                         fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
+                                        fontSize = if (isCompact) 10.sp else 11.sp,
                                         fontWeight = FontWeight.ExtraBold
                                     )
                                 }
@@ -1851,6 +2024,7 @@ fun ResultView(
             .padding(16.dp)
     ) {
         val isLandscape = maxWidth > maxHeight
+        val isCompact = maxWidth < 600.dp
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -1863,7 +2037,7 @@ fun ResultView(
                     style = TextStyle(
                         brush = RetroTitleBrush,
                         fontFamily = FontFamily.Serif,
-                        fontSize = 28.sp,
+                        fontSize = if (isCompact) 20.sp else 28.sp,
                         fontWeight = FontWeight.Black
                     )
                 )
@@ -1918,6 +2092,7 @@ fun ResultView(
                     // Column 2: Center Hero QR Code Card
                     QrHeroCard(
                         result = result,
+                        isCompact = isCompact,
                         onSaveGallery = {
                             val ok = BoothUtils.saveBitmapToGallery(
                                 context,
@@ -1981,10 +2156,11 @@ fun ResultView(
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     QrHeroCard(
                         result = result,
+                        isCompact = isCompact,
                         onSaveGallery = {
                             val ok = BoothUtils.saveBitmapToGallery(
                                 context,
@@ -2002,8 +2178,8 @@ fun ResultView(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(260.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            .height(if (isCompact) 210.dp else 260.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Surface(
                             color = CardCream,
@@ -2051,41 +2227,48 @@ fun ResultView(
 
             // Bottom Footer Buttons
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = if (isCompact) Modifier.fillMaxWidth() else Modifier,
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 10.dp else 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    modifier = Modifier
+                    modifier = (if (isCompact) Modifier.weight(1.3f) else Modifier)
                         .shadow(6.dp, RoundedCornerShape(50), spotColor = Terracotta)
                         .clip(RoundedCornerShape(50))
                         .background(RetroButtonBrush)
                         .defaultMinSize(minHeight = 48.dp)
                         .clickable { onRetake() }
-                        .padding(horizontal = 26.dp, vertical = 14.dp),
+                        .padding(horizontal = if (isCompact) 14.dp else 26.dp, vertical = if (isCompact) 13.dp else 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "TAKE MORE PHOTOS 📸",
+                        if (isCompact) "MORE PHOTOS 📸" else "TAKE MORE PHOTOS 📸",
                         color = Color.White,
                         fontFamily = FontFamily.SansSerif,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.5.sp,
-                        fontSize = 13.sp
+                        letterSpacing = 1.sp,
+                        fontSize = if (isCompact) 12.sp else 13.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
 
                 OutlinedButton(
                     onClick = onHome,
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                    modifier = (if (isCompact) Modifier.weight(0.9f) else Modifier).defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(1.5.dp, BorderWarm),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = CardCream.copy(alpha = 0.85f),
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp)
+                    contentPadding = PaddingValues(horizontal = if (isCompact) 10.dp else 22.dp, vertical = if (isCompact) 13.dp else 14.dp)
                 ) {
-                    Text("Done • Next Guest", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(
+                        if (isCompact) "Done ✦" else "Done • Next Guest",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isCompact) 12.sp else 13.sp,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
@@ -2095,6 +2278,7 @@ fun ResultView(
 @Composable
 private fun QrHeroCard(
     result: BoothResult,
+    isCompact: Boolean = false,
     onSaveGallery: () -> Unit,
     onShare: () -> Unit,
     modifier: Modifier = Modifier
@@ -2113,15 +2297,15 @@ private fun QrHeroCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(RetroCardBrush)
-                .padding(18.dp),
+                .padding(if (isCompact) 14.dp else 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Image(
                 painter = painterResource(id = R.drawable.logo_mingle_booth),
                 contentDescription = null,
                 modifier = Modifier
-                    .height(48.dp)
-                    .widthIn(max = 110.dp),
+                    .height(if (isCompact) 38.dp else 48.dp)
+                    .widthIn(max = if (isCompact) 90.dp else 110.dp),
                 contentScale = ContentScale.Fit
             )
             Text(
@@ -2129,18 +2313,18 @@ private fun QrHeroCard(
                 style = TextStyle(
                     brush = RetroTitleBrush,
                     fontFamily = FontFamily.Serif,
-                    fontSize = 18.sp,
+                    fontSize = if (isCompact) 16.sp else 18.sp,
                     fontWeight = FontWeight.Bold
                 )
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(20.dp),
                 shadowElevation = 2.dp,
                 border = BorderStroke(1.dp, BorderWarm),
-                modifier = Modifier.size(170.dp)
+                modifier = Modifier.size(if (isCompact) 140.dp else 170.dp)
             ) {
                 Image(
                     bitmap = result.qrBitmap.asImageBitmap(),
@@ -2148,7 +2332,7 @@ private fun QrHeroCard(
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(10.dp)
+                        .padding(if (isCompact) 8.dp else 10.dp)
                 )
             }
 
@@ -2157,12 +2341,12 @@ private fun QrHeroCard(
                 text = result.viewerUrl,
                 color = Terracotta,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
+                fontSize = if (isCompact) 9.sp else 10.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2172,12 +2356,12 @@ private fun QrHeroCard(
                     onClick = onSaveGallery,
                     modifier = Modifier
                         .weight(1f)
-                        .defaultMinSize(minHeight = 48.dp),
+                        .defaultMinSize(minHeight = 44.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(vertical = 12.dp)
+                    contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
@@ -2188,12 +2372,12 @@ private fun QrHeroCard(
                     onClick = onShare,
                     modifier = Modifier
                         .weight(1f)
-                        .defaultMinSize(minHeight = 48.dp),
+                        .defaultMinSize(minHeight = 44.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = SoftPeach,
                         contentColor = Espresso
                     ),
-                    contentPadding = PaddingValues(vertical = 12.dp)
+                    contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, tint = Terracotta, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
