@@ -316,14 +316,25 @@ object BoothUtils {
     suspend fun composeStrip(
         photos: List<Bitmap>,
         settings: BoothSettings,
-        cachedFrameBitmap: Bitmap? = null
+        cachedFrameBitmap: Bitmap? = null,
+        maxDimension: Int? = null
     ): Bitmap = withContext(Dispatchers.Default) {
         val activeFrame = settings.activeFrame
         val frameW = (activeFrame?.width ?: 1200).coerceAtLeast(400)
         val frameH = (activeFrame?.height ?: 3600).coerceAtLeast(600)
         val slots = (activeFrame?.slots ?: default3Slots()).sortedBy { it.slotIndex }
 
-        val scale = min(1f, 1800f / max(frameW, frameH).toFloat())
+        val maxDim = max(frameW, frameH).toFloat()
+        val scale = if (maxDimension != null) {
+            min(1f, maxDimension.toFloat() / maxDim)
+        } else {
+            // Full print-grade photostrip resolution following 2R (1200x3600), 4R (2400x3600),
+            // or square (2400x2400) templates while preserving natively larger frames up to 4200px.
+            val ratio = frameW.toFloat() / frameH.toFloat()
+            val targetMinMaxDim = if (ratio in 0.85f..1.15f) 2400f else 3600f
+            val desiredScale = max(1f, targetMinMaxDim / maxDim)
+            min(desiredScale, 4200f / maxDim)
+        }
         val outW = (frameW * scale).roundToInt()
         val outH = (frameH * scale).roundToInt()
 
@@ -686,8 +697,8 @@ object BoothUtils {
 
     suspend fun buildAnimatedGif(
         photos: List<Bitmap>,
-        width: Int = 0,
-        height: Int = 0,
+        width: Int = 1280,
+        height: Int = 720,
         delayMs: Int = 650
     ): ByteArray? = withContext(Dispatchers.Default) {
         if (photos.isEmpty()) return@withContext null
@@ -695,10 +706,10 @@ object BoothUtils {
             val first = photos.first()
             val isLandscape = first.width >= first.height
             val (targetW, targetH) = if (width > 0 && height > 0) {
-                // Respect explicit target dimensions (e.g. 1920x1080), adapting to photo orientation
+                // Respect target dimensions (default 1280x720 HD Hi-Res Composite), adapting to photo orientation
                 val w = if (isLandscape) maxOf(width, height) else minOf(width, height)
                 val h = if (isLandscape) minOf(width, height) else maxOf(width, height)
-                val maxAllowed = 1920
+                val maxAllowed = 1280
                 if (w > maxAllowed || h > maxAllowed) {
                     val scale = maxAllowed.toFloat() / maxOf(w, h)
                     ((w * scale).roundToInt() and 1.inv()) to ((h * scale).roundToInt() and 1.inv())
@@ -706,16 +717,8 @@ object BoothUtils {
                     (w and 1.inv()) to (h and 1.inv())
                 }
             } else {
-                // If original photo is already <= 1920x1080 (e.g. 1920x1080, 1280x720, 1080x1920),
-                // follow original file dimensions directly!
-                if (isLandscape && first.width <= 1920 && first.height <= 1080) {
-                    (first.width and 1.inv()) to (first.height and 1.inv())
-                } else if (!isLandscape && first.height <= 1920 && first.width <= 1080) {
-                    (first.width and 1.inv()) to (first.height and 1.inv())
-                } else {
-                    // Standardize high-res camera captures (e.g. 24MP Sony a6400 raw captures) to Full HD 1920x1080
-                    if (isLandscape) 1920 to 1080 else 1080 to 1920
-                }
+                // Standardize GIF output to 1280x720 (or 720x1280 portrait)
+                if (isLandscape) 1280 to 720 else 720 to 1280
             }
             val scaledFrames = photos.map { photo ->
                 centerCropBitmap(photo, targetW, targetH)

@@ -684,14 +684,9 @@ object RemoteRepository {
                 cachedFrameBitmap = frameBitmap
             )
 
-            // Re-encode animated GIF in Full HD / camera resolution
-            onProgress("Encoding improved animated GIF (1080p)…")
-            val (resW, resH) = effectiveSettings.cameraResolution.split("x").let {
-                val w = it.getOrNull(0)?.toIntOrNull() ?: 1920
-                val h = it.getOrNull(1)?.toIntOrNull() ?: 1080
-                w to h
-            }
-            val gifBytes = BoothUtils.buildAnimatedGif(downloadedBitmaps, width = resW, height = resH)
+            // Re-encode animated GIF in 720p HD (1280x720) Hi-Res Composite
+            onProgress("Encoding animated GIF (720p Hi-Res Composite)…")
+            val gifBytes = BoothUtils.buildAnimatedGif(downloadedBitmaps, width = 1280, height = 720)
 
             val slug = settings.eventTitle.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').take(40).ifBlank { "event" }
             val commonTags = listOf("mingle-booth", slug, "session_${session.id}", "regenerated")

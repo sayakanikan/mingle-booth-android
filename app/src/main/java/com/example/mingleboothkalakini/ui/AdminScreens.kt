@@ -1335,7 +1335,7 @@ private fun EventsAndFramesTab(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips and re-encode high-res Full HD animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
+                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips in full template resolution (2R/4R) and re-encode 720p Hi-Res Composite animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
                         color = Espresso,
                         fontFamily = FontFamily.SansSerif,
                         fontSize = 13.sp,
@@ -2949,7 +2949,7 @@ private fun GalleryTab(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips and re-encode high-res Full HD animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
+                        text = "Regenerate all photo sessions for this event in the background?\n\nThis will re-composite all photo strips in full template resolution (2R/4R) and re-encode 720p Hi-Res Composite animated GIFs from the original raw photos.\n\nYou can continue using the booth while the background process is running.",
                         color = Espresso,
                         fontFamily = FontFamily.SansSerif,
                         fontSize = 13.sp,

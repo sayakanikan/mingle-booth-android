@@ -1242,7 +1242,12 @@ fun ReviewView(
 
     LaunchedEffect(photos, photosRevision, settings, cachedFrameBitmap) {
         if (photos.isNotEmpty()) {
-            stripPreview = BoothUtils.composeStrip(photos, settings, cachedFrameBitmap)
+            stripPreview = BoothUtils.composeStrip(
+                photos = photos,
+                settings = settings,
+                cachedFrameBitmap = cachedFrameBitmap,
+                maxDimension = 1200
+            )
         }
     }
 
